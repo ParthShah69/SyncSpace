@@ -262,7 +262,9 @@ export default function ChatBoard({ workspaceId }) {
                 replyTo: rid,
                 attachments: finalAttachments
             });
+            addMessage(currentChannel._id, data);
             socket.emit('sendMessage', data);
+            setTimeout(scrollToBottom, 50);
         } catch (err) { console.error('Failed to send:', err); }
     };
 
@@ -868,8 +870,16 @@ export default function ChatBoard({ workspaceId }) {
                     </div>
                 </div>
             ) : (
-                <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500 bg-slate-50/50 dark:bg-slate-900">
-                    Select a channel to start chatting
+                <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50/50 dark:bg-slate-900">
+                    <div className="flex-shrink-0 h-14 border-b border-gray-100 dark:border-slate-800 px-4 md:px-6 flex items-center md:hidden">
+                        <button onClick={() => setIsSidebarOpen(true)} className="mr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                            <Hash size={20} />
+                        </button>
+                        <h2 className="font-bold text-gray-800 dark:text-gray-100 flex items-center">Channels</h2>
+                    </div>
+                    <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
+                        Select a channel to start chatting
+                    </div>
                 </div>
             )}
             {/* Poll Creation Modal */}

@@ -290,6 +290,13 @@ export default function Dashboard() {
                 ) : (
                     <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 relative overflow-hidden">
 
+                        {/* Mobile Sidebar Toggle (Empty State) */}
+                        <div className="absolute top-4 left-4 md:hidden z-20">
+                            <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-800 rounded-lg transition-colors">
+                                <Menu size={24} />
+                            </button>
+                        </div>
+
                         <div className="text-center max-w-md p-8 bg-white rounded-2xl shadow-xl border border-gray-100 relative z-10 transition-all">
                             <div className="w-20 h-20 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
                                 <LayoutDashboard size={40} className="text-indigo-500" />

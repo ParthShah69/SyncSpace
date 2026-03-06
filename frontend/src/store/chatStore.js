@@ -8,5 +8,7 @@ export const useChatStore = create((set) => ({
     setCurrentChannel: (channel) => set({ currentChannel: channel }),
     setMessages: (messages) => set({ messages }),
     prependMessages: (olderMessages) => set((state) => ({ messages: [...olderMessages, ...state.messages] })),
-    addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
+    addMessage: (message) => set((state) => ({ 
+        messages: state.messages.find(m => m._id === message._id) ? state.messages : [...state.messages, message] 
+    })),
 }));
