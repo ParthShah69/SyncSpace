@@ -13,6 +13,7 @@ import { format, isToday, isYesterday } from 'date-fns';
 const getDateLabel = (dateStr) => {
     if (!dateStr) return '';
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return 'Unknown Date'; // Safety check for invalid dates
     if (isToday(d)) return 'Today';
     if (isYesterday(d)) return 'Yesterday';
     return format(d, 'MMMM d, yyyy');
