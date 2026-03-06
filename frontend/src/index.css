@@ -1,0 +1,79 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Quill Dark Mode & Sizing Overrides */
+.quill-dark-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.quill-dark-wrapper .quill {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.quill-dark-wrapper .ql-container {
+    flex: 1;
+    overflow-y: auto;
+    border-bottom-left-radius: 0.5rem;
+    border-bottom-right-radius: 0.5rem;
+}
+
+.quill-dark-wrapper .ql-toolbar {
+    border-top-left-radius: 0.5rem;
+    border-top-right-radius: 0.5rem;
+}
+
+.dark .quill-dark-wrapper .ql-toolbar {
+    background-color: #1e293b;
+    /* slate-800 */
+    border-color: #334155;
+    /* slate-700 */
+}
+
+.dark .quill-dark-wrapper .ql-container {
+    background-color: #0f172a;
+    /* slate-900 */
+    border-color: #334155;
+    /* slate-700 */
+    color: #f1f5f9;
+    /* slate-100 */
+}
+
+.dark .quill-dark-wrapper .ql-stroke {
+    stroke: #cbd5e1;
+    /* slate-300 */
+}
+
+.dark .quill-dark-wrapper .ql-fill {
+    fill: #cbd5e1;
+    /* slate-300 */
+}
+
+.dark .quill-dark-wrapper .ql-picker {
+    color: #cbd5e1;
+}
+
+.dark .quill-dark-wrapper .ql-picker-options {
+    background-color: #1e293b;
+    border-color: #334155;
+}
+
+/* Hide scrollbars while keeping scroll functionality */
+.hide-scrollbar,
+.custom-scrollbar {
+    scrollbar-width: none;
+    /* Firefox */
+    -ms-overflow-style: none;
+    /* IE 10+ */
+}
+
+.hide-scrollbar::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
+    display: none;
+    /* Chrome, Safari, Edge */
+}
+
+/* Quill Toolbar — custom tooltips on hover */
