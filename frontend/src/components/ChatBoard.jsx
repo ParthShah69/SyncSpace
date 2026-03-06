@@ -275,8 +275,10 @@ export default function ChatBoard({ workspaceId }) {
                 replyTo: rid,
                 attachments: finalAttachments
             });
-            addMessage(currentChannel._id, data);
-            socket.emit('sendMessage', data);
+            // Populate senderId with the full user object so it renders immediately with correct name/avatar
+            const enrichedMessage = { ...data, senderId: user };
+            addMessage(currentChannel._id, enrichedMessage);
+            socket.emit('sendMessage', enrichedMessage);
             setTimeout(scrollToBottom, 50);
         } catch (err) { console.error('Failed to send:', err); }
     };
