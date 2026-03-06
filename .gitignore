@@ -7,3 +7,4 @@ frontend/node_modules/
 backend/.env
 frontend/.env
 .vercel
+.env*.local

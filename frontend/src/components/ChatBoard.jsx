@@ -870,15 +870,16 @@ export default function ChatBoard({ workspaceId }) {
                     </div>
                 </div>
             ) : (
-                <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50/50 dark:bg-slate-900">
-                    <div className="flex-shrink-0 h-14 border-b border-gray-100 dark:border-slate-800 px-4 md:px-6 flex items-center md:hidden">
-                        <button onClick={() => setIsSidebarOpen(true)} className="mr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                            <Hash size={20} />
+                <div className="flex-1 flex items-center justify-center bg-slate-50/50 dark:bg-slate-900/50">
+                    <div className="text-center p-8 max-w-sm">
+                        <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-indigo-100 dark:border-indigo-800/50">
+                            <Hash size={32} className="text-indigo-400 dark:text-indigo-500" />
+                        </div>
+                        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-2">No Channel Selected</h3>
+                        <p className="text-gray-500 dark:text-gray-400 text-sm">Select a channel from the sidebar or create a new one to start chatting.</p>
+                        <button onClick={() => setIsSidebarOpen(true)} className="md:hidden mt-4 px-4 py-2 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-900 transition-colors rounded-lg text-sm font-medium">
+                            View Channels List
                         </button>
-                        <h2 className="font-bold text-gray-800 dark:text-gray-100 flex items-center">Channels</h2>
-                    </div>
-                    <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
-                        Select a channel to start chatting
                     </div>
                 </div>
             )}
