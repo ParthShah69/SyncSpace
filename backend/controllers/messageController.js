@@ -101,9 +101,9 @@ export const sendMessage = async (req, res) => {
         });
 
         await message.populate([
-            { path: 'senderId', select: 'name avatar' },
-            { path: 'replyTo', select: 'text', populate: { path: 'senderId', select: 'name avatar' } },
-            { path: 'readBy.user', select: 'name avatar' },
+            { path: 'senderId', select: 'name username avatar' },
+            { path: 'replyTo', select: 'text', populate: { path: 'senderId', select: 'name username avatar' } },
+            { path: 'readBy.user', select: 'name username avatar' },
         ]);
 
         res.status(201).json(message);

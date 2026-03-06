@@ -188,6 +188,8 @@ export default function ChatBoard({ workspaceId }) {
 
         const handleNewMessage = (message) => {
             const ch = currentChannelRef.current;
+            // Skip if this message was sent by ME (already added optimistically)
+            if (message.senderId?._id === user._id || message.senderId === user._id) return;
             if (message.channelId === ch?._id) {
                 addMessage(message);
                 setTimeout(() => markAsRead(ch._id), 300);
@@ -275,10 +277,9 @@ export default function ChatBoard({ workspaceId }) {
                 replyTo: rid,
                 attachments: finalAttachments
             });
-            // Populate senderId with the full user object so it renders immediately with correct name/avatar
-            const enrichedMessage = { ...data, senderId: user };
-            addMessage(currentChannel._id, enrichedMessage);
-            socket.emit('sendMessage', enrichedMessage);
+            // The API response now has senderId fully populated (name, username, avatar)
+            addMessage(data);
+            socket.emit('sendMessage', data);
             setTimeout(scrollToBottom, 50);
         } catch (err) { console.error('Failed to send:', err); }
     };

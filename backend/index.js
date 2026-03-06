@@ -67,8 +67,8 @@ io.on('connection', (socket) => {
     });
 
     socket.on('sendMessage', (message) => {
-        // Broadcast to the channel
-        io.to(message.channelId).emit('newMessage', message);
+        // Use socket.to() not io.to() — sender already added message optimistically
+        socket.to(message.channelId).emit('newMessage', message);
     });
 
     // Broadcast updated read receipts to everyone in the channel
