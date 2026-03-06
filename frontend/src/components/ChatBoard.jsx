@@ -164,9 +164,14 @@ export default function ChatBoard({ workspaceId }) {
 
     // Socket setup on channel change
     useEffect(() => {
-        if (!currentChannel) return;
-        socket.connect();
-        socket.emit('joinChannel', currentChannel._id);
+        // Join the channel room — must wait until socket is actually connected
+        const joinChannel = () => socket.emit('joinChannel', currentChannel._id);
+        if (socket.connected) {
+            joinChannel();
+        } else {
+            socket.once('connect', joinChannel);
+            socket.connect();
+        }
 
         const fetchMessages = async () => {
             try {
@@ -229,6 +234,7 @@ export default function ChatBoard({ workspaceId }) {
         socket.on('userStopTyping', handleStopTyping);
 
         return () => {
+            socket.off('connect', joinChannel);  // clean up pending once listener
             socket.off('newMessage', handleNewMessage);
             socket.off('messagesRead', handleMessagesRead);
             socket.off('userTyping', handleUserTyping);
