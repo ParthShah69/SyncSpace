@@ -10,10 +10,22 @@ import {
 import api from '../utils/api';
 import { format, isToday, isYesterday } from 'date-fns';
 
-const getDateLabel = (dateStr) => {
-    if (!dateStr) return '';
+// Safe wrapper – never throws RangeError on null / invalid timestamps
+const safeDate = (dateStr) => {
+    if (!dateStr) return null;
     const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return 'Unknown Date'; // Safety check for invalid dates
+    return isNaN(d.getTime()) ? null : d;
+};
+
+const safeFormat = (dateStr, fmt, fallback = '') => {
+    const d = safeDate(dateStr);
+    if (!d) return fallback;
+    try { return format(d, fmt); } catch { return fallback; }
+};
+
+const getDateLabel = (dateStr) => {
+    const d = safeDate(dateStr);
+    if (!d) return '';
     if (isToday(d)) return 'Today';
     if (isYesterday(d)) return 'Yesterday';
     return format(d, 'MMMM d, yyyy');
@@ -604,7 +616,7 @@ export default function ChatBoard({ workspaceId }) {
                             const isFirstUnread = msg._id === firstUnreadId;
                             const isProfileOpen = openProfilePopover === msg._id;
                             const prevMsg = idx > 0 ? messages[idx - 1] : null;
-                            const showDateDivider = !prevMsg || new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
+                            const showDateDivider = !prevMsg || (safeDate(msg.createdAt)?.toDateString() ?? '') !== (safeDate(prevMsg.createdAt)?.toDateString() ?? '');
 
                             return (
                                 <div key={msg._id || idx}>
@@ -655,7 +667,7 @@ export default function ChatBoard({ workspaceId }) {
                                                     <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
                                                         {isMe ? 'You' : (senderUsername ? `@${senderUsername}` : senderName)}
                                                     </span>
-                                                    <span className="text-[10px] text-gray-400 dark:text-gray-500">{format(new Date(msg.createdAt), 'h:mm a')}</span>
+                                                    <span className="text-[10px] text-gray-400 dark:text-gray-500">{safeFormat(msg.createdAt, 'h:mm a')}</span>
                                                 </div>
 
                                                 {/* Bubble + action buttons */}
