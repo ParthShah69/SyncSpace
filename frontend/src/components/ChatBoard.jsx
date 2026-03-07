@@ -7,7 +7,7 @@ import { socket } from '../socket';
 import {
     Hash, CornerDownRight, CheckSquare, FileText, Reply, X, Plus,
     Trash2, Check, CheckCheck, AtSign, BarChart2, Paperclip, File, Loader2,
-    BellOff, Bell, Menu, Send
+    BellOff, Bell, Menu, Send, LogOut
 } from 'lucide-react';
 import api from '../utils/api';
 import { format, isToday, isYesterday } from 'date-fns';
