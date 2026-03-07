@@ -51,6 +51,8 @@ export const registerUser = async (req, res) => {
                 username: user.username,
                 email: user.email,
                 avatar: user.avatar,
+                mutedChannels: user.mutedChannels || [],
+                leftChannels: user.leftChannels || [],
             });
         } else {
             res.status(400).json({ message: 'Invalid user data' });
@@ -145,6 +147,8 @@ export const loginUser = async (req, res) => {
                 username: user.username,
                 email: user.email,
                 avatar: user.avatar,
+                mutedChannels: user.mutedChannels || [],
+                leftChannels: user.leftChannels || [],
             });
         } else {
             res.status(401).json({ message: 'Invalid email or password' });
@@ -180,7 +184,45 @@ export const getUserProfile = async (req, res) => {
                 username: user.username,
                 email: user.email,
                 avatar: user.avatar,
-                joinedWorkspaces: user.joinedWorkspaces
+                joinedWorkspaces: user.joinedWorkspaces,
+                mutedChannels: user.mutedChannels || [],
+                leftChannels: user.leftChannels || [],
+            });
+        } else {
+            res.status(404).json({ message: 'User not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+// @desc    Update user profile
+// @route   PUT /api/auth/profile
+// @access  Private
+export const updateUserProfile = async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id);
+        if (user) {
+            user.name = req.body.name || user.name;
+            user.username = (req.body.username || user.username).toLowerCase();
+            user.email = req.body.email || user.email;
+            user.avatar = req.body.avatar || user.avatar;
+            if (req.body.mutedChannels) user.mutedChannels = req.body.mutedChannels;
+            if (req.body.leftChannels) user.leftChannels = req.body.leftChannels;
+
+            if (req.body.password) {
+                const salt = await bcrypt.genSalt(10);
+                user.passwordHash = await bcrypt.hash(req.body.password, salt);
+            }
+
+            const updatedUser = await user.save();
+            res.json({
+                _id: updatedUser._id,
+                name: updatedUser.name,
+                username: updatedUser.username,
+                email: updatedUser.email,
+                avatar: updatedUser.avatar,
+                mutedChannels: updatedUser.mutedChannels || [],
+                leftChannels: updatedUser.leftChannels || [],
             });
         } else {
             res.status(404).json({ message: 'User not found' });

@@ -1,6 +1,8 @@
 import Message from '../models/Message.js';
 import Channel from '../models/Channel.js';
 import Workspace from '../models/Workspace.js';
+import Notification from '../models/Notification.js';
+import User from '../models/User.js';
 
 // @desc    Get messages for a channel
 // @route   GET /api/messages/:channelId
@@ -105,6 +107,41 @@ export const sendMessage = async (req, res) => {
             { path: 'replyTo', select: 'text', populate: { path: 'senderId', select: 'name username avatar' } },
             { path: 'readBy.user', select: 'name username avatar' },
         ]);
+
+        // --- Notification Logic ---
+        const otherMembers = workspace.members.filter(m => (m.user?._id || m.user).toString() !== userId.toString());
+
+        for (const member of otherMembers) {
+            const memberId = (member.user?._id || member.user).toString();
+            const memberUser = await User.findById(memberId);
+            if (!memberUser) continue;
+
+            const isMuted = memberUser.mutedChannels?.some(chId => chId.toString() === channelId.toString());
+            const isMentioned = (mentions || []).some(mId => mId.toString() === memberId);
+
+            if (isMentioned || !isMuted) {
+                const notification = await Notification.create({
+                    recipient: memberId,
+                    sender: userId,
+                    workspaceId: channel.workspaceId,
+                    type: isMentioned ? 'mention' : 'general',
+                    content: isMentioned ? `mentioned you in #${channel.name}` : `new message in #${channel.name}`,
+                    link: `/dashboard/chat/${channelId}`,
+                    relatedId: message._id
+                });
+
+                await notification.populate([
+                    { path: 'sender', select: 'name username avatar' },
+                    { path: 'workspaceId', select: 'name' }
+                ]);
+
+                // Emit real-time notification to the personal room
+                const io = req.app.get('io');
+                if (io) {
+                    io.to(memberId).emit('newNotification', notification);
+                }
+            }
+        }
 
         res.status(201).json(message);
     } catch (error) {

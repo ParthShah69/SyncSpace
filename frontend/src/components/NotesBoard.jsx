@@ -1,19 +1,39 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, FileText, Calendar, Clock, CheckCircle2, Trash2, Menu, X, Download, FileDown, FileCode2 } from 'lucide-react';
+import {
+    Plus, FileText, Calendar, Clock, CheckCircle2, Trash2, Menu, X,
+    Download, FileDown, FileCode2, Users, Shield, ShieldCheck,
+    CheckSquare, Square, Save, Loader2, Search, Settings
+} from 'lucide-react';
+import { useAuthStore } from '../store/authStore';
+import { useWorkspaceStore } from '../store/workspaceStore';
 import api from '../utils/api';
 import { format } from 'date-fns';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
+import { useSearchParams } from 'react-router-dom';
 
 export default function NotesBoard({ workspaceId }) {
+    const { user } = useAuthStore();
+    const { workspaces } = useWorkspaceStore();
+    const workspace = workspaces.find(w => w._id === workspaceId);
+
     const [notes, setNotes] = useState([]);
     const [activeNote, setActiveNote] = useState(null);
     const [content, setContent] = useState('');
     const [title, setTitle] = useState('');
+    const [checklists, setChecklists] = useState([]);
+
+    const [searchParams] = useSearchParams();
+    const highlightId = searchParams.get('highlight');
+
     const [isSaving, setIsSaving] = useState(false);
     const [loading, setLoading] = useState(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+    const [mobileView, setMobileView] = useState('editor'); // 'editor' or 'checklist'
+
     const quillRef = useRef(null);
+    const saveTimeoutRef = useRef(null);
 
     useEffect(() => {
         if (!workspaceId) return;
@@ -22,7 +42,12 @@ export default function NotesBoard({ workspaceId }) {
             try {
                 const { data } = await api.get(`/notes/workspace/${workspaceId}`);
                 setNotes(data);
-                if (data.length > 0) {
+
+                if (highlightId) {
+                    const target = data.find(n => n._id === highlightId);
+                    if (target) selectNote(target);
+                    else if (data.length > 0) selectNote(data[0]);
+                } else if (data.length > 0) {
                     selectNote(data[0]);
                 } else {
                     setActiveNote(null);
@@ -34,7 +59,7 @@ export default function NotesBoard({ workspaceId }) {
             }
         };
         fetchNotes();
-    }, [workspaceId]);
+    }, [workspaceId, highlightId]);
 
     // Inject native title tooltips on Quill toolbar buttons after editor mounts
     useEffect(() => {
@@ -77,15 +102,23 @@ export default function NotesBoard({ workspaceId }) {
         setActiveNote(note);
         setTitle(note.title || 'Untitled Note');
         setContent(note.content || '');
+        setChecklists(note.checklists || []);
         setIsSidebarOpen(false);
     };
+
+    const myMemberData = workspace?.members?.find(m => (m.user?._id || m.user).toString() === user._id.toString());
+    const isAdmin = myMemberData?.role === 'owner' || myMemberData?.role === 'admin';
+    const isCreator = activeNote?.creator && (activeNote.creator._id || activeNote.creator).toString() === user._id.toString();
+    const canEdit = isAdmin || isCreator || activeNote?.allowedEditors?.some(eId => eId.toString() === user._id.toString());
 
     const handleCreateNote = async () => {
         try {
             const { data } = await api.post('/notes', {
                 workspaceId,
-                title: 'Untitled Note',
+                title: 'Strategic Intel',
                 content: '',
+                checklists: [],
+                allowedEditors: [user._id]
             });
             setNotes([data, ...notes]);
             selectNote(data);
@@ -110,29 +143,76 @@ export default function NotesBoard({ workspaceId }) {
         }
     };
 
-    // Simple auto-save simulation with debouncing
+    // Enhanced auto-save logic
     useEffect(() => {
-        if (!activeNote) return;
+        if (!activeNote || !canEdit) return;
 
-        // Only save if content or title changed
-        if (activeNote.title === title && activeNote.content === content) return;
+        // Check if anything actually changed
+        const hasTitleChanged = title !== activeNote.title;
+        const hasContentChanged = content !== activeNote.content;
+        const hasChecklistChanged = JSON.stringify(checklists) !== JSON.stringify(activeNote.checklists);
 
-        const timeoutId = setTimeout(async () => {
+        if (!hasTitleChanged && !hasContentChanged && !hasChecklistChanged) return;
+
+        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+        saveTimeoutRef.current = setTimeout(async () => {
             setIsSaving(true);
             try {
-                const { data } = await api.put(`/notes/${activeNote._id}`, { title, content });
-                // Update list
+                const { data } = await api.put(`/notes/${activeNote._id}`, {
+                    title,
+                    content,
+                    checklists
+                });
                 setNotes(notes.map(n => n._id === data._id ? data : n));
-                setActiveNote(data);
+                setActiveNote(prev => ({ ...prev, ...data }));
             } catch (error) {
                 console.error("Failed to save note", error);
             } finally {
                 setIsSaving(false);
             }
-        }, 1000);
+        }, 1500);
 
-        return () => clearTimeout(timeoutId);
-    }, [title, content, activeNote?._id]); // intentional dependencies
+        return () => {
+            if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+        };
+    }, [title, content, checklists, activeNote?._id, canEdit]);
+
+    const handleToggleCheckItem = (idx) => {
+        if (!canEdit) return;
+        const newChecklists = [...checklists];
+        newChecklists[idx].completed = !newChecklists[idx].completed;
+        setChecklists(newChecklists);
+    };
+
+    const handleAddCheckItem = () => {
+        if (!canEdit) return;
+        setChecklists([...checklists, { text: 'New tactical item', completed: false }]);
+    };
+
+    const handleRemoveCheckItem = (idx) => {
+        if (!canEdit) return;
+        setChecklists(checklists.filter((_, i) => i !== idx));
+    };
+
+    const handleUpdateCheckText = (idx, text) => {
+        if (!canEdit) return;
+        const newChecklists = [...checklists];
+        newChecklists[idx].text = text;
+        setChecklists(newChecklists);
+    };
+
+    const handleUpdatePermissions = async (userIds) => {
+        try {
+            const { data } = await api.put(`/notes/${activeNote._id}`, {
+                allowedEditors: userIds
+            });
+            setActiveNote(data);
+            setNotes(notes.map(n => n._id === data._id ? data : n));
+        } catch (error) {
+            console.error("Failed to update permissions", error);
+        }
+    };
 
     const [showExportMenu, setShowExportMenu] = useState(false);
 
@@ -222,40 +302,40 @@ export default function NotesBoard({ workspaceId }) {
     }
 
     return (
-        <div className="flex h-full bg-white dark:bg-slate-900 overflow-hidden rounded-xl shadow-sm border border-gray-100 dark:border-slate-800 relative transition-colors duration-200">
+        <div className="flex h-full bg-[var(--bg-main)] overflow-hidden rounded-3xl shadow-2xl border border-[var(--border-color)] relative transition-all duration-500 font-sans">
 
-            {/* Mobile Sidebar Overlay */}
+            {/* Premium Mobile Sidebar Overlay */}
             {isSidebarOpen && (
                 <div
-                    className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm z-20 md:hidden"
+                    className="absolute inset-0 bg-slate-900/60 backdrop-blur-md z-40 md:hidden animate-in fade-in duration-300"
                     onClick={() => setIsSidebarOpen(false)}
                 />
             )}
 
-            {/* Sidebar: Notes List */}
-            <div className={`absolute md:relative w-72 h-full bg-slate-50 dark:bg-slate-800/50 border-r border-gray-100 dark:border-slate-700/50 flex flex-col z-30 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-                <div className="p-4 border-b border-gray-100 dark:border-slate-700/50 flex items-center justify-between z-10">
-                    <h2 className="font-bold text-gray-800 dark:text-gray-200 flex items-center">
-                        <FileText size={18} className="mr-2 text-emerald-500 dark:text-emerald-400" /> Notes
-                    </h2>
-                    <div className="flex space-x-2">
-                        <button
-                            type="button"
-                            onClick={handleCreateNote}
-                            className="p-1.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-200 dark:hover:bg-emerald-500/30 transition-colors"
-                        >
-                            <Plus size={16} />
-                        </button>
-                        <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                            <X size={16} />
-                        </button>
+            {/* Sidebar: Notes Navigation */}
+            <div className={`absolute md:relative w-80 h-full bg-[var(--bg-surface)] backdrop-blur-xl border-r border-[var(--border-color)] flex flex-col z-50 transition-all duration-500 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 shadow-2xl md:shadow-none'}`}>
+                <div className="p-6 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-surface)]">
+                    <div className="flex flex-col">
+                        <h2 className="font-black text-[var(--text-primary)] text-xl tracking-tight uppercase flex items-center gap-2">
+                            <FileText size={20} className="text-[var(--brand-primary)]" />
+                            Tactical Hub
+                        </h2>
+                        <span className="text-[9px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] mt-1">Intelligence Repository</span>
                     </div>
+                    <button
+                        type="button"
+                        onClick={handleCreateNote}
+                        className="w-10 h-10 brand-gradient-bg text-white rounded-xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-lg shadow-[var(--brand-primary)]/20"
+                    >
+                        <Plus size={20} />
+                    </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-[var(--bg-main)]/30">
                     {notes.length === 0 ? (
-                        <div className="text-center text-gray-400 dark:text-gray-500 text-sm mt-8 p-4">
-                            No notes yet. Create one to start writing.
+                        <div className="flex flex-col items-center justify-center h-full text-center p-8 opacity-40">
+                            <Search size={48} className="mb-4 text-[var(--text-disabled)]" />
+                            <p className="text-[10px] font-black uppercase tracking-widest text-[var(--text-disabled)] leading-relaxed">System clear. No tactical intel found.</p>
                         </div>
                     ) : (
                         notes.map(note => (
@@ -263,121 +343,292 @@ export default function NotesBoard({ workspaceId }) {
                                 <button
                                     type="button"
                                     onClick={() => selectNote(note)}
-                                    className={`w-full text-left p-3 rounded-xl transition-all border ${activeNote?._id === note._id
-                                        ? 'bg-white dark:bg-slate-700 border-emerald-200 dark:border-emerald-500/50 shadow-sm ring-1 ring-emerald-500/20'
-                                        : 'bg-transparent border-transparent hover:bg-gray-100 dark:hover:bg-slate-700/50'
+                                    className={`w-full text-left p-4 rounded-2xl transition-all border group-hover:scale-[1.02] active:scale-[0.98] ${activeNote?._id === note._id
+                                        ? 'bg-[var(--bg-surface)] border-[var(--brand-primary)] shadow-xl shadow-[var(--brand-primary)]/10 ring-1 ring-[var(--brand-primary)]/30'
+                                        : 'bg-transparent border-transparent hover:bg-[var(--bg-surface)] hover:border-[var(--border-color)]'
                                         }`}
                                 >
-                                    <h4 className={`font-medium text-sm truncate pr-6 ${activeNote?._id === note._id ? 'text-emerald-800 dark:text-emerald-300' : 'text-gray-700 dark:text-gray-300'}`}>
-                                        {note.title || 'Untitled Note'}
+                                    <h4 className={`font-black text-sm truncate pr-8 tracking-tight ${activeNote?._id === note._id ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)] opacity-70 group-hover:opacity-100'}`}>
+                                        {note.title || 'Untitled Strategic Document'}
                                     </h4>
-                                    <div className="flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 mt-2">
-                                        <div className="flex items-center">
-                                            <Calendar size={10} className="mr-1" />
-                                            {note.updatedAt ? format(new Date(note.updatedAt), 'MMM d, yyyy') : 'Just now'}
+                                    <div className="flex items-center justify-between text-[9px] font-black uppercase tracking-widest text-[var(--text-disabled)] mt-3">
+                                        <div className="flex items-center gap-1.5">
+                                            <Calendar size={10} />
+                                            {note.updatedAt ? format(new Date(note.updatedAt), 'MMM d, yyyy') : 'Live'}
                                         </div>
+                                        {note.checklists?.length > 0 && (
+                                            <div className="flex items-center gap-1 text-[var(--brand-secondary)]">
+                                                <CheckSquare size={10} />
+                                                {note.checklists.filter(c => c.completed).length}/{note.checklists.length}
+                                            </div>
+                                        )}
                                     </div>
                                 </button>
-                                <button
-                                    onClick={(e) => handleDeleteNote(e, note._id)}
-                                    className="absolute right-2 top-3 opacity-0 group-hover:opacity-100 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-all"
-                                >
-                                    <Trash2 size={14} />
-                                </button>
+                                {(isAdmin || String(note.lastEditedBy) === String(user._id)) && (
+                                    <button
+                                        onClick={(e) => handleDeleteNote(e, note._id)}
+                                        className="absolute right-3 top-4 opacity-0 group-hover:opacity-100 p-2 text-[var(--text-disabled)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all z-10"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                )}
                             </div>
                         ))
                     )}
                 </div>
             </div>
 
-            {/* Main Editor Area */}
+            {/* Main Content Area: High-Performance Editor */}
             {activeNote ? (
-                <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-slate-900 relative">
+                <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-surface)] relative transition-all duration-500">
 
-                    {/* Editor Header */}
-                    <div className="h-14 border-b border-gray-100 dark:border-slate-800 px-4 md:px-6 flex items-center justify-between bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-10 transition-colors duration-200">
-                        <div className="flex flex-1 items-center">
-                            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden mr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                    {/* Editor Header: Mission-Critical Controls */}
+                    <div className="h-20 border-b border-[var(--border-color)] px-6 md:px-10 flex items-center justify-between bg-[var(--bg-surface)]/80 backdrop-blur-xl sticky top-0 z-40">
+                        <div className="flex flex-1 items-center min-w-0 mr-4">
+                            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden mr-4 text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-2 rounded-xl hover:bg-[var(--bg-main)] transition-all">
                                 <Menu size={20} />
                             </button>
-                            <input
-                                type="text"
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                className="text-lg font-bold text-gray-800 dark:text-gray-100 bg-transparent border-none focus:ring-0 outline-none w-full"
-                                placeholder="Note Title"
-                            />
-                        </div>
-
-                        <div className="flex items-center text-xs text-gray-400 dark:text-gray-500 ml-4 shrink-0 relative">
-                            {isSaving ? (
-                                <span className="flex items-center text-emerald-600 dark:text-emerald-400 mr-3"><Clock size={12} className="mr-1 animate-pulse" /> Saving...</span>
-                            ) : (
-                                <span className="flex items-center mr-3"><CheckCircle2 size={12} className="mr-1" /> Saved</span>
-                            )}
-
-                            <button
-                                onClick={(e) => { e.stopPropagation(); setShowExportMenu(!showExportMenu); }}
-                                className="flex items-center justify-center p-1.5 ml-1 text-gray-500 hover:text-emerald-600 bg-gray-100 hover:bg-emerald-50 dark:bg-slate-800 dark:text-gray-400 dark:hover:text-emerald-400 dark:hover:bg-slate-700 rounded-md transition-colors"
-                                title="Export Note"
-                            >
-                                <Download size={16} />
-                            </button>
-
-                            {showExportMenu && (
-                                <div className="absolute top-10 right-0 z-50 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl shadow-xl py-2 min-w-[160px]" onClick={e => e.stopPropagation()}>
-                                    <button
-                                        onClick={handleExportPdf}
-                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2"
-                                    >
-                                        <FileDown size={14} className="text-red-500" /> Export as PDF
-                                    </button>
-                                    <button
-                                        onClick={handleExportTxt}
-                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2"
-                                    >
-                                        <FileCode2 size={14} className="text-blue-500" /> Export as TXT
-                                    </button>
+                            <div className="flex flex-col flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                    {!canEdit && <Shield size={14} className="text-[var(--text-disabled)] shrink-0" />}
+                                    <input
+                                        type="text"
+                                        value={title}
+                                        onChange={(e) => setTitle(e.target.value)}
+                                        readOnly={!canEdit}
+                                        className={`text-xl font-black text-[var(--text-primary)] bg-transparent border-none focus:ring-0 outline-none w-full tracking-tight transition-all ${!canEdit ? 'cursor-not-allowed opacity-70' : ''}`}
+                                        placeholder="Intelligence Subject"
+                                    />
                                 </div>
-                            )}
+                                <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[9px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em]">Strategy File {activeNote._id.slice(-6)}</span>
+                                    {!canEdit && <span className="text-[8px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded">Read Only</span>}
+                                </div>
+                            </div>
                         </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                            <div className="hidden sm:flex items-center mr-4">
+                                {isSaving ? (
+                                    <div className="flex items-center text-[10px] font-black text-[var(--brand-primary)] uppercase tracking-widest animate-pulse">
+                                        <Loader2 size={12} className="mr-2 animate-spin" /> Syncing Hub...
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center text-[10px] font-black text-[var(--brand-secondary)] uppercase tracking-widest opacity-60">
+                                        <ShieldCheck size={12} className="mr-2" /> Verified & Saved
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex items-center gap-2 bg-[var(--bg-main)] p-1.5 rounded-2xl border border-[var(--border-color)] shadow-sm">
+                                {(isAdmin || isCreator) && (
+                                    <button
+                                        onClick={() => setShowPermissionsModal(true)}
+                                        className="p-2.5 text-[var(--text-secondary)] hover:text-[var(--brand-primary)] hover:bg-[var(--bg-surface)] rounded-xl transition-all"
+                                        title="Team Access"
+                                    >
+                                        <Users size={18} />
+                                    </button>
+                                )}
+                                <div className="w-px h-6 bg-[var(--border-color)]" />
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setShowExportMenu(!showExportMenu); }}
+                                    className="p-2.5 text-[var(--text-secondary)] hover:text-[var(--brand-secondary)] hover:bg-[var(--bg-surface)] rounded-xl transition-all relative"
+                                    title="Export Intel"
+                                >
+                                    <Download size={18} />
+                                    {showExportMenu && (
+                                        <div className="absolute top-12 right-0 z-[60] bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-2xl shadow-2xl py-2 min-w-[200px] animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+                                            <div className="px-4 py-2 border-b border-[var(--border-color)] mb-1">
+                                                <span className="text-[9px] font-black text-[var(--text-disabled)] uppercase tracking-widest">Select Protocol</span>
+                                            </div>
+                                            <button onClick={handleExportPdf} className="w-full text-left px-4 py-3 text-xs font-black text-[var(--text-primary)] hover:bg-[var(--bg-main)] flex items-center gap-3 uppercase tracking-tighter transition-all">
+                                                <FileDown size={14} className="text-red-500" /> Secure PDF Export
+                                            </button>
+                                            <button onClick={handleExportTxt} className="w-full text-left px-4 py-3 text-xs font-black text-[var(--text-primary)] hover:bg-[var(--bg-main)] flex items-center gap-3 uppercase tracking-tighter transition-all">
+                                                <FileCode2 size={14} className="text-blue-500" /> Structural Text Export
+                                            </button>
+                                        </div>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {/* Mobile View Toggle */}
+                    <div className="flex md:hidden bg-[var(--bg-main)] p-1.5 border-b border-[var(--border-color)]">
+                        <button
+                            onClick={() => setMobileView('editor')}
+                            className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${mobileView === 'editor' ? 'brand-gradient-bg text-white shadow-md' : 'text-[var(--text-disabled)]'}`}
+                        >
+                            Editor
+                        </button>
+                        <button
+                            onClick={() => setMobileView('checklist')}
+                            className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${mobileView === 'checklist' ? 'brand-gradient-bg text-white shadow-md' : 'text-[var(--text-disabled)]'}`}
+                        >
+                            Objectives
+                        </button>
                     </div>
 
-                    {/* Editor Textarea / Quill */}
-                    <div className="flex-1 overflow-hidden relative quill-dark-wrapper flex flex-col">
-                        <ReactQuill
-                            ref={quillRef}
-                            theme="snow"
-                            value={content || ''}
-                            onChange={setContent}
-                            className="flex-1 flex flex-col h-full editor-container dark:text-gray-100"
-                            placeholder="Start writing securely..."
-                            modules={{
-                                toolbar: [
-                                    [{ 'header': [1, 2, 3, false] }],
-                                    ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-                                    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
-                                    ['link', 'code-block'],
-                                    ['clean']
-                                ]
-                            }}
-                        />
-                    </div>
-                </div>
-            ) : (
-                <div className="flex-1 flex items-center justify-center bg-gray-50/50 dark:bg-slate-900/50">
-                    <div className="text-center p-8 max-w-sm">
-                        <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-100 dark:border-emerald-800/50">
-                            <FileText size={32} className="text-emerald-400 dark:text-emerald-500" />
+                    {/* Dual-Pane Layout: Editor & Checklist */}
+                    <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-[var(--bg-main)]/20">
+                        {/* Editor View */}
+                        <div className={`${mobileView === 'editor' ? 'flex' : 'hidden md:flex'} flex-[3] flex flex-col overflow-hidden relative border-r border-[var(--border-color)]/30`}>
+                            <div className="flex-1 overflow-hidden quill-syncspace-wrapper relative">
+                                <ReactQuill
+                                    ref={quillRef}
+                                    theme="snow"
+                                    value={content || ''}
+                                    onChange={setContent}
+                                    readOnly={!canEdit}
+                                    className={`h-full editor-main-view ${!canEdit ? 'read-only-mode' : ''}`}
+                                    placeholder="Initiating secure intelligence feed..."
+                                    modules={{
+                                        toolbar: [
+                                            [{ 'header': [1, 2, 3, false] }],
+                                            ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+                                            [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                                            ['link', 'code-block'],
+                                            ['clean']
+                                        ]
+                                    }}
+                                />
+                            </div>
                         </div>
-                        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-2">No Note Selected</h3>
-                        <p className="text-gray-500 dark:text-gray-400 text-sm">Select a note from the sidebar or create a new one to start writing.</p>
-                        <button onClick={() => setIsSidebarOpen(true)} className="md:hidden mt-4 px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg text-sm font-medium">
-                            View Notes List
+
+                        {/* Tactical Checklist Sidebar */}
+                        <div className={`${mobileView === 'checklist' ? 'flex' : 'hidden md:flex'} flex-1 flex flex-col bg-[var(--bg-surface)]/50 backdrop-blur-sm p-6 overflow-y-auto custom-scrollbar border-l border-[var(--border-color)]`}>
+                            <div className="flex items-center justify-between mb-6">
+                                <h4 className="text-xs font-black text-[var(--text-primary)] uppercase tracking-widest flex items-center gap-2">
+                                    <CheckSquare size={16} className="text-[var(--brand-secondary)]" />
+                                    Tactical Objectives
+                                </h4>
+                                {canEdit && (
+                                    <button
+                                        onClick={handleAddCheckItem}
+                                        className="p-1.5 bg-[var(--brand-secondary)]/10 text-[var(--brand-secondary)] rounded-lg hover:bg-[var(--brand-secondary)] hover:text-white transition-all"
+                                    >
+                                        <Plus size={14} />
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="space-y-4">
+                                {checklists.length === 0 ? (
+                                    <div className="py-10 text-center opacity-30">
+                                        <p className="text-[9px] font-black uppercase tracking-widest">No objectives assigned</p>
+                                    </div>
+                                ) : (
+                                    checklists.map((item, idx) => (
+                                        <div key={idx} className="group flex items-start gap-3 bg-[var(--bg-surface)] p-4 rounded-2xl border border-[var(--border-color)] shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
+                                            <button
+                                                onClick={() => handleToggleCheckItem(idx)}
+                                                disabled={!canEdit}
+                                                className={`mt-1 transition-all ${item.completed ? 'text-[var(--brand-secondary)]' : 'text-[var(--text-disabled)]'}`}
+                                            >
+                                                {item.completed ? <CheckCircle2 size={18} /> : <Square size={18} />}
+                                            </button>
+                                            <div className="flex-1 min-w-0">
+                                                <input
+                                                    type="text"
+                                                    value={item.text}
+                                                    onChange={(e) => handleUpdateCheckText(idx, e.target.value)}
+                                                    readOnly={!canEdit}
+                                                    className={`w-full bg-transparent border-none p-0 text-xs font-bold focus:ring-0 outline-none tracking-tight ${item.completed ? 'line-through opacity-50' : 'text-[var(--text-primary)]'}`}
+                                                />
+                                            </div>
+                                            {
+                                                canEdit && (
+                                                    <button
+                                                        onClick={() => handleRemoveCheckItem(idx)}
+                                                        className="opacity-0 group-hover:opacity-100 text-[var(--text-disabled)] hover:text-red-500 transition-all"
+                                                    >
+                                                        <X size={14} />
+                                                    </button>
+                                                )
+                                            }
+                                        </div >
+                                    ))
+                                )
+                                }
+                            </div >
+                        </div >
+                    </div >
+
+                    {/* Permission Manager Modal (Admins & Creators Only) */}
+                    {
+                        showPermissionsModal && (isAdmin || isCreator) && (
+                            <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={() => setShowPermissionsModal(false)}>
+                                <div className="bg-[var(--bg-surface)] rounded-2xl md:rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-400 border border-[var(--border-color)]" onClick={e => e.stopPropagation()}>
+                                    <div className="p-6 md:p-8 border-b border-[var(--border-color)] bg-[var(--bg-main)]/30">
+                                        <h3 className="text-xl font-black text-[var(--text-primary)] tracking-tight uppercase">Strategic Access Control</h3>
+                                        <p className="text-[10px] font-black text-[var(--text-secondary)] uppercase tracking-widest mt-1">Assign Edit Protocol to Specialists</p>
+                                    </div>
+                                    <div className="p-6 md:p-8 max-h-[50vh] md:max-h-[60vh] overflow-y-auto custom-scrollbar space-y-3">
+                                        {workspace?.members?.map(m => {
+                                            const mUser = m.user;
+                                            if (!mUser) return null;
+                                            const noteCreatorId = (activeNote.creator?._id || activeNote.creator);
+                                            const isNoteCreator = String(noteCreatorId) === String(mUser._id);
+                                            const isWorkspaceOwner = m.role === 'owner';
+                                            const isAllowed = isWorkspaceOwner || isNoteCreator || (activeNote.allowedEditors || []).some(id => String(id) === String(mUser._id));
+
+                                            return (
+                                                <div key={mUser._id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-main)]/20 gap-3">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 rounded-xl brand-gradient-bg flex items-center justify-center text-white font-black shadow-sm">
+                                                            {mUser.name?.charAt(0)}
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="text-xs font-black text-[var(--text-primary)] tracking-tight truncate max-w-[150px]">{mUser.name}</span>
+                                                            <span className="text-[9px] font-black text-[var(--text-disabled)] uppercase tracking-widest">{m.role}</span>
+                                                        </div>
+                                                    </div>
+                                                    {(isWorkspaceOwner || isNoteCreator) ? (
+                                                        <span className="text-[8px] font-black text-[var(--brand-primary)] uppercase tracking-widest bg-[var(--brand-primary)]/10 px-2 py-1 rounded">Locked Access</span>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => {
+                                                                const currentIds = activeNote.allowedEditors || [];
+                                                                const newIds = isAllowed
+                                                                    ? currentIds.filter(id => String(id) !== String(mUser._id))
+                                                                    : [...currentIds, mUser._id];
+                                                                handleUpdatePermissions(newIds);
+                                                            }}
+                                                            className={`w-full sm:w-auto px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isAllowed ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'bg-[var(--brand-secondary)]/10 text-[var(--brand-secondary)] border border-[var(--brand-secondary)]/20'}`}
+                                                        >
+                                                            {isAllowed ? 'Revoke Protocol' : 'Grant Protocol'}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="p-4 md:p-6 bg-[var(--bg-main)]/30 border-t border-[var(--border-color)] flex justify-end">
+                                        <button onClick={() => setShowPermissionsModal(false)} className="w-full sm:w-auto px-8 py-3 brand-gradient-bg text-white rounded-2xl font-black text-xs shadow-xl shadow-[var(--brand-primary)]/20 transform hover:scale-105 active:scale-95 transition-all">Secure Hub Protocol</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                    }
+                </div >
+            ) : (
+                <div className="flex-1 flex flex-col items-center justify-center bg-[var(--bg-main)]/30 relative overflow-hidden">
+                    <div className="relative z-10 text-center p-12 max-w-md">
+                        <div className="w-24 h-24 brand-gradient-bg rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-[var(--brand-primary)]/40 transform -rotate-12 animate-float">
+                            <FileText size={48} className="text-white" />
+                        </div>
+                        <h3 className="text-2xl font-black text-[var(--text-primary)] mb-4 tracking-tighter uppercase">Intelligence Gap Detected</h3>
+                        <p className="text-sm font-bold text-[var(--text-secondary)] opacity-60 leading-relaxed mb-10">Select a strategic document from the hub or initiate a new intelligence protocol to start documenting your tactical mission.</p>
+                        <button
+                            onClick={() => setIsSidebarOpen(true)}
+                            className="md:hidden w-full py-4 bg-[var(--bg-surface)] text-[var(--brand-primary)] rounded-2xl font-black text-xs uppercase tracking-widest border border-[var(--border-color)] shadow-xl transform active:scale-95 transition-all"
+                        >
+                            Access Tactical Hub
                         </button>
                     </div>
                 </div>
             )}
-        </div>
+        </div >
     );
 }

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useWorkspaceStore } from '../store/workspaceStore';
-import { LogOut, Plus, Users, LayoutDashboard, Settings, Hash, HashIcon, Moon, Sun, Menu, X } from 'lucide-react';
+import { LogOut, Plus, Users, LayoutDashboard, Settings, Hash, HashIcon, Moon, Sun, Menu, X, Bell } from 'lucide-react';
 import api from '../utils/api';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { socket } from '../socket';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import ChatBoard from '../components/ChatBoard';
 import TaskBoard from '../components/TaskBoard';
 import NotesBoard from '../components/NotesBoard';
@@ -14,12 +15,17 @@ export default function Dashboard() {
     const { workspaces, setWorkspaces, currentWorkspace, setCurrentWorkspace, isLoading, setLoading } = useWorkspaceStore();
     const { id: workspaceIdFromUrl } = useParams();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
 
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showJoinModal, setShowJoinModal] = useState(false);
     const [showInviteModal, setShowInviteModal] = useState(false);
     const [showAccountModal, setShowAccountModal] = useState(false);
     const [showWorkspaceSettingsModal, setShowWorkspaceSettingsModal] = useState(false);
+    const [showNotificationModal, setShowNotificationModal] = useState(false);
+
+    const [notifications, setNotifications] = useState([]);
+    const [unreadCount, setUnreadCount] = useState(0);
 
     const [newWorkspaceName, setNewWorkspaceName] = useState('');
     const [joinCode, setJoinCode] = useState('');
@@ -40,6 +46,16 @@ export default function Dashboard() {
             document.documentElement.classList.remove('dark');
         }
     }, []);
+
+    // Sync activeTab with URL search params
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab && ['chat', 'tasks', 'notes'].includes(tab)) {
+            setActiveTab(tab);
+        } else if (searchParams.get('channel')) {
+            setActiveTab('chat');
+        }
+    }, [searchParams]);
 
     const toggleDarkMode = () => {
         if (isDarkMode) {
@@ -75,8 +91,53 @@ export default function Dashboard() {
                 setLoading(false);
             }
         };
+
+        const fetchNotifications = async () => {
+            try {
+                const { data } = await api.get('/notifications');
+                setNotifications(data);
+                setUnreadCount(data.filter(n => !n.isRead).length);
+            } catch (error) {
+                console.error("Failed to fetch notifications", error);
+            }
+        };
+
         fetchWorkspaces();
+        fetchNotifications();
     }, [setWorkspaces, setCurrentWorkspace, setLoading, workspaceIdFromUrl, navigate]);
+
+    // Socket: Real-time Notifications
+    useEffect(() => {
+        if (!user?._id) return;
+
+        socket.emit('joinUser', user._id);
+
+        const handleNewNotification = (notification) => {
+            setNotifications(prev => [notification, ...prev]);
+            setUnreadCount(prev => prev + 1);
+
+            // Optional: Browser notification
+            if (Notification.permission === 'granted') {
+                new window.Notification('SyncSpace Update', {
+                    body: notification.content,
+                    icon: '/icon.png'
+                });
+            }
+        };
+
+        socket.on('newNotification', handleNewNotification);
+
+        return () => {
+            socket.off('newNotification', handleNewNotification);
+        };
+    }, [user?._id]);
+
+    // Request browser notification permission
+    useEffect(() => {
+        if (window.Notification && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }, []);
 
     const handleCreateWorkspace = async (e) => {
         e.preventDefault();
@@ -115,6 +176,26 @@ export default function Dashboard() {
         }
     };
 
+    const handleMarkAsRead = async (id) => {
+        try {
+            await api.put(`/notifications/${id}/read`);
+            setNotifications(notifications.map(n => n._id === id ? { ...n, isRead: true } : n));
+            setUnreadCount(prev => Math.max(0, prev - 1));
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const handleMarkAllAsRead = async () => {
+        try {
+            await api.put('/notifications/read-all');
+            setNotifications(notifications.map(n => ({ ...n, isRead: true })));
+            setUnreadCount(0);
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
     const handleRemoveMember = async (memberId) => {
         if (!confirm('Are you sure you want to remove this member?')) return;
         try {
@@ -138,37 +219,34 @@ export default function Dashboard() {
             )}
 
             {/* Sidebar - Workspaces & Navigation */}
-            <div className={`fixed md:relative w-64 h-full bg-slate-900 text-slate-300 flex flex-col shadow-2xl z-50 border-r border-slate-800 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+            <div className={`fixed md:relative w-64 h-full bg-[var(--bg-surface)] text-[var(--text-secondary)] flex flex-col shadow-xl z-50 border-r border-[var(--border-color)] transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
 
                 {/* App Header */}
-                <div className="h-16 flex items-center justify-between px-4 font-bold text-xl text-white border-b border-slate-800 bg-slate-950/50 backdrop-blur-sm shadow-sm">
-                    <div className="flex items-center">
-                        <div className="w-8 h-8 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-lg mr-3 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                            <LayoutDashboard size={18} className="text-white" />
-                        </div>
-                        SyncSpace
-                    </div>
-                    <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-white">
+                <div className="h-16 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-surface)] backdrop-blur-sm shadow-sm overflow-hidden">
+                    <Link to="/dashboard" className="flex items-center hover:opacity-80 transition-opacity">
+                        <img src="/logo.png" className="h-10 w-auto object-contain" alt="SyncSpace Logo" />
+                    </Link>
+                    <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
                         <X size={20} />
                     </button>
                 </div>
 
                 {/* Workspace Selector */}
-                <div className="p-4 flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                <div className="p-4 flex-1 overflow-y-auto custom-scrollbar bg-[var(--bg-main)]/30">
+                    <div className="flex items-center justify-between text-xs font-semibold text-[var(--text-disabled)] uppercase tracking-wider mb-3">
                         <span>Your Workspaces</span>
                         <div className="flex space-x-1">
                             <button
                                 onClick={() => setShowJoinModal(true)}
                                 title="Join Workspace"
-                                className="p-1 hover:bg-slate-700 rounded-md transition-colors text-slate-300 hover:text-white"
+                                className="p-1 hover:bg-[var(--bg-main)] rounded-md transition-colors text-[var(--text-secondary)] hover:text-[var(--brand-secondary)]"
                             >
                                 <HashIcon size={16} />
                             </button>
                             <button
                                 onClick={() => setShowCreateModal(true)}
                                 title="Create Workspace"
-                                className="p-1 hover:bg-slate-700 rounded-md transition-colors text-slate-300 hover:text-white"
+                                className="p-1 hover:bg-[var(--bg-main)] rounded-md transition-colors text-[var(--text-secondary)] hover:text-[var(--brand-primary)]"
                             >
                                 <Plus size={16} />
                             </button>
@@ -177,25 +255,25 @@ export default function Dashboard() {
 
                     <div className="space-y-1">
                         {isLoading ? (
-                            <div className="text-sm text-slate-500 px-2 py-2 animate-pulse">Loading workspaces...</div>
+                            <div className="text-sm text-[var(--text-disabled)] px-2 py-2 animate-pulse">Loading workspaces...</div>
                         ) : workspaces.length === 0 ? (
-                            <div className="text-sm text-slate-500 px-2 py-2">No workspaces yet.</div>
+                            <div className="text-sm text-[var(--text-disabled)] px-2 py-2">No workspaces yet.</div>
                         ) : (
                             workspaces.map((ws) => (
                                 <Link
                                     key={ws._id}
                                     to={`/workspace/${ws._id}`}
                                     onClick={() => setCurrentWorkspace(ws)}
-                                    className={`flex items-center w-full px-3 py-2 text-sm rounded-lg transition-all duration-200 group ${currentWorkspace?._id === ws._id
-                                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50'
-                                        : 'hover:bg-slate-800 hover:text-slate-100'
+                                    className={`flex items-center w-full px-3 py-2 text-sm rounded-xl transition-all duration-200 group ${currentWorkspace?._id === ws._id
+                                        ? 'bg-[var(--brand-primary)] text-white shadow-lg shadow-[var(--brand-primary)]/20'
+                                        : 'hover:bg-[var(--bg-main)] hover:text-[var(--text-primary)]'
                                         }`}
                                 >
-                                    <div className={`w-6 h-6 rounded flex items-center justify-center mr-3 text-xs font-bold ${currentWorkspace?._id === ws._id ? 'bg-indigo-500' : 'bg-slate-700 group-hover:bg-slate-600'
+                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center mr-3 text-xs font-black ${currentWorkspace?._id === ws._id ? 'bg-white/20' : 'bg-[var(--bg-main)] group-hover:bg-[var(--border-color)]'
                                         }`}>
                                         {ws.name.charAt(0).toUpperCase()}
                                     </div>
-                                    <span className="truncate flex-1">{ws.name}</span>
+                                    <span className="truncate flex-1 font-medium">{ws.name}</span>
                                 </Link>
                             ))
                         )}
@@ -203,20 +281,20 @@ export default function Dashboard() {
                 </div>
 
                 {/* User Profile Footer */}
-                <div className="p-4 border-t border-slate-800 bg-slate-900/50">
+                <div className="p-4 border-t border-[var(--border-color)] bg-[var(--bg-surface)]">
                     <div className="flex items-center justify-between">
-                        <div className="flex items-center">
-                            <div className="w-9 h-9 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 flex items-center justify-center text-white font-bold shadow-md">
+                        <div className="flex items-center min-w-0">
+                            <div className="w-10 h-10 rounded-full brand-gradient-bg flex items-center justify-center text-white font-black shadow-md shrink-0">
                                 {user?.name?.charAt(0).toUpperCase()}
                             </div>
-                            <div className="ml-3 truncate max-w-[120px]">
-                                <p className="text-sm font-medium text-white truncate">{user?.name}</p>
-                                <p className="text-xs text-slate-400 truncate">{user?.email}</p>
+                            <div className="ml-3 truncate">
+                                <p className="text-sm font-bold text-[var(--text-primary)] truncate">{user?.name}</p>
+                                <p className="text-[10px] text-[var(--text-secondary)] truncate uppercase tracking-tighter">{user?.email}</p>
                             </div>
                         </div>
                         <button
                             onClick={handleLogout}
-                            className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"
+                            className="p-2 text-[var(--text-disabled)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
                             title="Logout"
                         >
                             <LogOut size={18} />
@@ -230,26 +308,26 @@ export default function Dashboard() {
                 {currentWorkspace ? (
                     <>
                         {/* Main Header */}
-                        <div className="h-16 border-b border-gray-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-10 flex items-center justify-between px-4 md:px-6 shadow-sm transition-colors duration-200">
+                        <div className="h-16 border-b border-[var(--border-color)] bg-[var(--bg-surface)] backdrop-blur-md sticky top-0 z-10 flex items-center justify-between px-4 md:px-6 transition-colors duration-200">
                             <div className="flex items-center gap-3 md:gap-6 overflow-x-auto no-scrollbar">
-                                <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-1 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded">
+                                <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-main)] rounded-lg transition-colors">
                                     <Menu size={20} />
                                 </button>
-                                <div className="flex items-center gap-2 pr-4 md:pr-6 border-r border-gray-200 dark:border-slate-700 whitespace-nowrap">
-                                    <h1 className="text-lg md:text-xl font-bold text-gray-800 dark:text-gray-100">{currentWorkspace.name}</h1>
-                                    <span className="hidden sm:inline-block bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full">
+                                <div className="flex items-center gap-2 pr-4 md:pr-6 border-r border-[var(--border-color)] whitespace-nowrap">
+                                    <h1 className="text-lg md:text-xl font-black text-[var(--text-primary)] tracking-tight">{currentWorkspace.name}</h1>
+                                    <span className="hidden sm:inline-block bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] text-[10px] uppercase font-black px-2 py-0.5 rounded-full">
                                         {currentWorkspace.members?.length || 1} Members
                                     </span>
                                 </div>
                                 {/* Navigation Tabs */}
-                                <div className="flex space-x-1">
+                                <div className="flex p-1 bg-[var(--bg-main)] rounded-xl space-x-1">
                                     {['chat', 'tasks', 'notes'].map((tab) => (
                                         <button
                                             key={tab}
                                             onClick={() => setActiveTab(tab)}
-                                            className={`px-3 md:px-4 py-2 text-sm font-medium rounded-lg capitalize transition-colors ${activeTab === tab
-                                                ? 'bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-indigo-400'
-                                                : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-slate-800'
+                                            className={`px-4 py-1.5 text-xs font-black rounded-lg capitalize transition-all duration-300 ${activeTab === tab
+                                                ? 'brand-gradient-bg text-white shadow-md'
+                                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                                                 }`}
                                         >
                                             {tab}
@@ -257,19 +335,30 @@ export default function Dashboard() {
                                     ))}
                                 </div>
                             </div>
-                            <div className="flex items-center space-x-2 md:space-x-3 ml-2">
-                                <button onClick={toggleDarkMode} className="p-2 text-gray-400 hover:text-indigo-500 dark:text-gray-400 dark:hover:text-amber-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
+                            <div className="flex items-center space-x-2 ml-2">
+                                <button
+                                    onClick={() => setShowNotificationModal(true)}
+                                    className="p-2 text-[var(--text-secondary)] hover:text-[var(--brand-primary)] hover:bg-[var(--bg-main)] rounded-xl transition-all relative"
+                                >
+                                    <Bell size={20} />
+                                    {unreadCount > 0 && (
+                                        <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[8px] font-black flex items-center justify-center rounded-full border-2 border-[var(--bg-surface)] animate-bounce">
+                                            {unreadCount > 9 ? '9+' : unreadCount}
+                                        </span>
+                                    )}
+                                </button>
+                                <button onClick={toggleDarkMode} className="p-2 text-[var(--text-secondary)] hover:text-[var(--brand-primary)] hover:bg-[var(--bg-main)] rounded-xl transition-all">
                                     {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
                                 </button>
-                                <button onClick={() => setShowInviteModal(true)} className="hidden sm:flex items-center text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition-colors">
+                                <button onClick={() => setShowInviteModal(true)} className="hidden sm:flex items-center text-xs font-black text-white brand-gradient-bg px-4 py-2 rounded-xl transition-all transform hover:scale-105 active:scale-95 shadow-lg shadow-[var(--brand-primary)]/20">
                                     <Users size={16} className="mr-2" />
                                     Invite
                                 </button>
-                                <button onClick={() => setShowWorkspaceSettingsModal(true)} className="p-2 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-slate-800 rounded-lg transition-colors" title="Workspace Settings">
+                                <button onClick={() => setShowWorkspaceSettingsModal(true)} className="p-2 text-[var(--text-secondary)] hover:text-[var(--brand-primary)] hover:bg-[var(--bg-main)] rounded-xl transition-all" title="Workspace Settings">
                                     <Settings size={20} />
                                 </button>
-                                <button onClick={() => setShowAccountModal(true)} className="p-2 ml-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors" title="My Account">
-                                    <div className="w-6 h-6 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 flex items-center justify-center text-white text-[10px] font-bold shadow-md">
+                                <button onClick={() => setShowAccountModal(true)} className="p-0.5 ml-1 rounded-full border-2 border-[var(--brand-secondary)] hover:border-[var(--brand-primary)] transition-all transform hover:rotate-6" title="My Account">
+                                    <div className="w-8 h-8 rounded-full brand-gradient-bg flex items-center justify-center text-white text-[10px] font-black">
                                         {user?.name?.charAt(0).toUpperCase()}
                                     </div>
                                 </button>
@@ -326,34 +415,35 @@ export default function Dashboard() {
 
             {/* Create Workspace Modal */}
             {showCreateModal && (
-                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
-                        <div className="p-6 border-b border-gray-100 dark:border-slate-700">
-                            <h3 className="text-xl font-bold text-gray-800 dark:text-white">Create New Workspace</h3>
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
+                    <div className="bg-[var(--bg-surface)] rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-400 border border-[var(--border-color)]">
+                        <div className="p-8 border-b border-[var(--border-color)]">
+                            <h3 className="text-2xl font-black text-[var(--text-primary)] tracking-tight">Create Workspace</h3>
+                            <p className="text-sm text-[var(--text-secondary)] mt-1">Start a new space for your team</p>
                         </div>
-                        <form onSubmit={handleCreateWorkspace} className="p-6 space-y-4">
+                        <form onSubmit={handleCreateWorkspace} className="p-8 space-y-6">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Workspace Name</label>
+                                <label className="block text-xs font-black text-[var(--text-secondary)] uppercase tracking-widest mb-2 ml-1">Workspace Name</label>
                                 <input
                                     type="text"
                                     required
                                     value={newWorkspaceName}
                                     onChange={(e) => setNewWorkspaceName(e.target.value)}
-                                    placeholder="e.g. Acme Corp, Engineering Team"
-                                    className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all dark:text-white"
+                                    placeholder="e.g. Acme Corp, Engineering"
+                                    className="w-full px-5 py-4 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl focus:ring-2 focus:ring-[var(--brand-primary)] focus:border-transparent outline-none transition-all text-[var(--text-primary)] font-medium"
                                 />
                             </div>
-                            <div className="flex justify-end gap-3 pt-4">
+                            <div className="flex justify-end gap-3 pt-2">
                                 <button
                                     type="button"
                                     onClick={() => setShowCreateModal(false)}
-                                    className="px-5 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                                    className="px-6 py-3 text-sm font-black text-[var(--text-secondary)] bg-[var(--bg-main)] rounded-2xl hover:bg-[var(--border-color)] transition-all"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 shadow-md shadow-indigo-200 transition-colors"
+                                    className="px-8 py-3 text-sm font-black text-white brand-gradient-bg rounded-2xl shadow-lg shadow-[var(--brand-primary)]/25 transform hover:scale-105 active:scale-95 transition-all"
                                 >
                                     Create
                                 </button>
@@ -364,26 +454,27 @@ export default function Dashboard() {
             )}
             {/* Join Workspace Modal */}
             {showJoinModal && (
-                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowJoinModal(false)}>
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center">
-                            <h3 className="text-xl font-bold text-gray-800 dark:text-white">Join Workspace</h3>
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={() => setShowJoinModal(false)}>
+                    <div className="bg-[var(--bg-surface)] rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-400 border border-[var(--border-color)]" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-8 border-b border-[var(--border-color)]">
+                            <h3 className="text-2xl font-black text-[var(--text-primary)] tracking-tight">Join Workspace</h3>
+                            <p className="text-sm text-[var(--text-secondary)] mt-1">Enter an invite code to join a team</p>
                         </div>
-                        <form onSubmit={handleJoinWorkspace} className="p-6 space-y-4">
+                        <form onSubmit={handleJoinWorkspace} className="p-8 space-y-6">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Invite Code</label>
+                                <label className="block text-xs font-black text-[var(--text-secondary)] uppercase tracking-widest mb-2 ml-1">Invite Code</label>
                                 <input
                                     type="text"
                                     required
                                     value={joinCode}
                                     onChange={(e) => setJoinCode(e.target.value)}
-                                    placeholder="Enter your invite code"
-                                    className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all dark:text-white"
+                                    placeholder="Paste code here..."
+                                    className="w-full px-5 py-4 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-2xl focus:ring-2 focus:ring-[var(--brand-secondary)] focus:border-transparent outline-none transition-all text-[var(--text-primary)] font-medium"
                                 />
                             </div>
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button type="button" onClick={() => setShowJoinModal(false)} className="px-5 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">Cancel</button>
-                                <button type="submit" className="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 shadow-md shadow-indigo-200 transition-colors">Join</button>
+                            <div className="flex justify-end gap-3 pt-2">
+                                <button type="button" onClick={() => setShowJoinModal(false)} className="px-6 py-3 text-sm font-black text-[var(--text-secondary)] bg-[var(--bg-main)] rounded-2xl hover:bg-[var(--border-color)] transition-all">Cancel</button>
+                                <button type="submit" className="px-8 py-3 text-sm font-black text-white bg-[var(--brand-secondary)] rounded-2xl shadow-lg shadow-[var(--brand-secondary)]/25 transform hover:scale-105 active:scale-95 transition-all">Join</button>
                             </div>
                         </form>
                     </div>
@@ -392,22 +483,22 @@ export default function Dashboard() {
 
             {/* Invite Modal */}
             {showInviteModal && currentWorkspace && (
-                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowInviteModal(false)}>
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center">
-                            <h3 className="text-xl font-bold text-gray-800 dark:text-white">Invite Members</h3>
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={() => setShowInviteModal(false)}>
+                    <div className="bg-[var(--bg-surface)] rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-400 border border-[var(--border-color)]" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-8 border-b border-[var(--border-color)]">
+                            <h3 className="text-2xl font-black text-[var(--text-primary)] tracking-tight">Invite Team</h3>
+                            <p className="text-sm text-[var(--text-secondary)] mt-1">Share this code with your teammates</p>
                         </div>
-                        <div className="p-6 space-y-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400">Share this code with your team securely so they can join the workspace.</p>
-                            <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
-                                <code className="flex-1 text-indigo-600 font-bold select-all">{currentWorkspace.inviteLink || currentWorkspace._id}</code>
+                        <div className="p-8 space-y-6">
+                            <div className="flex items-center gap-3 p-5 bg-[var(--bg-main)] rounded-2xl border-2 border-dashed border-[var(--border-color)]">
+                                <code className="flex-1 text-[var(--brand-primary)] font-black text-lg tracking-widest select-all">{currentWorkspace.inviteLink || currentWorkspace._id}</code>
                                 <button onClick={() => {
                                     navigator.clipboard.writeText(currentWorkspace.inviteLink || currentWorkspace._id);
                                     alert('Copied to clipboard!');
-                                }} className="px-3 py-1 bg-white border border-gray-200 shadow-sm text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium">Copy</button>
+                                }} className="px-4 py-2 bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-primary)] rounded-xl hover:bg-[var(--bg-main)] text-xs font-black transition-all">COPY</button>
                             </div>
-                            <div className="flex justify-end pt-4">
-                                <button onClick={() => setShowInviteModal(false)} className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors">Done</button>
+                            <div className="flex justify-end">
+                                <button onClick={() => setShowInviteModal(false)} className="px-8 py-3 brand-gradient-bg text-white rounded-2xl font-black text-sm shadow-xl shadow-[var(--brand-primary)]/20 transform hover:scale-105 transition-all">Done</button>
                             </div>
                         </div>
                     </div>
@@ -416,18 +507,18 @@ export default function Dashboard() {
 
             {/* Account Settings Modal */}
             {showAccountModal && (
-                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowAccountModal(false)}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-300" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-gray-100 bg-gray-50 text-center">
-                            <div className="w-20 h-20 mx-auto rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 flex items-center justify-center text-white text-2xl font-bold shadow-lg shadow-blue-500/30 mb-4 border-4 border-white">
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={() => setShowAccountModal(false)}>
+                    <div className="bg-[var(--bg-surface)] rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-400 border border-[var(--border-color)]" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-10 border-b border-[var(--border-color)] bg-[var(--bg-main)]/50 text-center">
+                            <div className="w-24 h-24 mx-auto rounded-full brand-gradient-bg flex items-center justify-center text-white text-3xl font-black shadow-xl shadow-[var(--brand-primary)]/30 mb-6 border-4 border-[var(--bg-surface)] transform hover:rotate-6 transition-transform">
                                 {user?.name?.charAt(0).toUpperCase()}
                             </div>
-                            <h3 className="text-xl font-bold text-gray-900">{user?.name}</h3>
-                            <p className="text-gray-500 text-sm">{user?.email}</p>
+                            <h3 className="text-2xl font-black text-[var(--text-primary)] tracking-tight">{user?.name}</h3>
+                            <p className="text-[var(--text-secondary)] text-sm font-medium mt-1">{user?.email}</p>
                         </div>
-                        <div className="p-4 bg-white">
-                            <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-5 py-3 text-red-600 bg-red-50 hover:bg-red-100 rounded-xl font-medium transition-colors">
-                                <LogOut size={18} /> Sign Out of SyncSpace
+                        <div className="p-6 bg-[var(--bg-surface)]">
+                            <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-6 py-4 text-red-500 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-2xl font-black text-sm transition-all transform active:scale-95">
+                                <LogOut size={18} /> SIGN OUT
                             </button>
                         </div>
                     </div>
@@ -436,24 +527,27 @@ export default function Dashboard() {
 
             {/* Workspace Settings Modal */}
             {showWorkspaceSettingsModal && currentWorkspace && (
-                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowWorkspaceSettingsModal(false)}>
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-300" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center shrink-0">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-lg">
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={() => setShowWorkspaceSettingsModal(false)}>
+                    <div className="bg-[var(--bg-surface)] rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-400 border border-[var(--border-color)]" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-8 border-b border-[var(--border-color)] flex justify-between items-center shrink-0">
+                            <div className="flex items-center gap-4">
+                                <div className="w-14 h-14 rounded-2xl brand-gradient-bg flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-[var(--brand-primary)]/20">
                                     {currentWorkspace.name.charAt(0)}
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 leading-tight">{currentWorkspace.name}</h3>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Workspace Settings</p>
+                                    <h3 className="text-2xl font-black text-[var(--text-primary)] tracking-tight leading-none">{currentWorkspace.name}</h3>
+                                    <p className="text-xs text-[var(--text-secondary)] font-black uppercase tracking-widest mt-1">Workspace Settings</p>
                                 </div>
                             </div>
-                            <button onClick={() => setShowWorkspaceSettingsModal(false)} className="text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 p-2 rounded-xl transition-colors"><X size={20} /></button>
+                            <button onClick={() => setShowWorkspaceSettingsModal(false)} className="text-[var(--text-secondary)] hover:bg-[var(--bg-main)] p-3 rounded-2xl transition-all"><X size={20} /></button>
                         </div>
 
-                        <div className="p-6 overflow-y-auto hide-scrollbar flex-1">
-                            <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-4 tracking-wide uppercase">Members ({currentWorkspace.members?.length || 0})</h4>
-                            <div className="space-y-3">
+                        <div className="p-8 overflow-y-auto custom-scrollbar flex-1">
+                            <h4 className="text-xs font-black text-[var(--text-primary)] mb-6 tracking-widest uppercase flex items-center gap-2">
+                                <Users size={14} className="text-[var(--brand-secondary)]" />
+                                Members — {currentWorkspace.members?.length || 0}
+                            </h4>
+                            <div className="space-y-4">
                                 {currentWorkspace.members?.map((member) => {
                                     const mUser = member.user || {};
                                     const isMe = String(mUser._id) === String(user._id);
@@ -465,34 +559,121 @@ export default function Dashboard() {
                                     const canIRemove = amIOwnerOrAdmin && !isOwner && !isMe;
 
                                     return (
-                                        <div key={mUser._id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/30 hover:bg-gray-50 dark:hover:bg-slate-800/80 transition-colors">
-                                            <div className="flex items-center gap-3 min-w-0">
-                                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold shadow-sm shrink-0">
-                                                    {mUser.avatar ? <img src={mUser.avatar} className="w-full h-full rounded-full" alt="" /> : mUser.name?.charAt(0)?.toUpperCase()}
+                                        <div key={mUser._id} className="flex items-center justify-between p-4 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-main)]/50 hover:bg-[var(--bg-main)] transition-all group shadow-sm hover:shadow-md">
+                                            <div className="flex items-center gap-4 min-w-0">
+                                                <div className="w-12 h-12 rounded-full brand-gradient-bg flex items-center justify-center text-white font-black text-lg shadow-inner shrink-0 p-0.5">
+                                                    {mUser.avatar ? <img src={mUser.avatar} className="w-full h-full rounded-full border-2 border-[var(--bg-surface)]" alt="" /> : <div className="w-full h-full rounded-full flex items-center justify-center bg-[var(--bg-surface)] text-[var(--brand-primary)] text-xl">{mUser.name?.charAt(0)?.toUpperCase()}</div>}
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">{mUser.name} {isMe && <span className="text-[10px] font-normal text-gray-400">(You)</span>}</p>
-                                                        {isOwner && <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-500 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Owner</span>}
-                                                        {!isOwner && member.role === 'admin' && <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Admin</span>}
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <p className="text-sm font-black text-[var(--text-primary)] truncate">{mUser.name} {isMe && <span className="text-[10px] font-black text-[var(--brand-secondary)] uppercase ml-1">#YOU</span>}</p>
+                                                        {isOwner && <span className="text-[10px] bg-yellow-400 text-black font-black px-2 py-0.5 rounded-lg uppercase tracking-wider shadow-sm">Owner</span>}
+                                                        {!isOwner && member.role === 'admin' && <span className="text-[10px] bg-[var(--brand-primary)] text-white font-black px-2 py-0.5 rounded-lg uppercase tracking-wider shadow-sm">Admin</span>}
                                                     </div>
-                                                    <p className="text-xs text-gray-500 truncate mt-0.5">{mUser.email}</p>
+                                                    <p className="text-[10px] font-bold text-[var(--text-secondary)] truncate uppercase tracking-tighter mt-0.5 opacity-70">{mUser.email}</p>
                                                 </div>
                                             </div>
 
                                             {canIRemove && (
                                                 <button
                                                     onClick={() => handleRemoveMember(mUser._id)}
-                                                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors ml-2"
+                                                    className="p-3 text-[var(--text-disabled)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100"
                                                     title="Remove Member"
                                                 >
-                                                    <X size={16} />
+                                                    <X size={18} />
                                                 </button>
                                             )}
                                         </div>
                                     );
                                 })}
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Notification Modal */}
+            {showNotificationModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[60] flex items-center justify-end animate-in fade-in duration-300" onClick={() => setShowNotificationModal(false)}>
+                    <div className="bg-[var(--bg-surface)] w-full max-w-sm h-full shadow-2xl animate-in slide-in-from-right duration-500 border-l border-[var(--border-color)] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-6 border-b border-[var(--border-color)] flex justify-between items-center bg-[var(--bg-surface)]">
+                            <div>
+                                <h3 className="text-xl font-black text-[var(--text-primary)] tracking-tight uppercase">Intel Hub</h3>
+                                <p className="text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-widest mt-0.5">Mission Critical Alerts</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {unreadCount > 0 && (
+                                    <button onClick={handleMarkAllAsRead} className="text-[9px] font-black text-[var(--brand-primary)] uppercase tracking-wider hover:opacity-70 transition-opacity">Clear All</button>
+                                )}
+                                <button onClick={() => setShowNotificationModal(false)} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-2 rounded-xl hover:bg-[var(--bg-main)] transition-all">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
+                            {notifications.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-40">
+                                    <Bell size={48} className="mb-4 text-[var(--text-disabled)]" />
+                                    <p className="text-xs font-black uppercase tracking-widest">No Active Intelligence</p>
+                                </div>
+                            ) : (
+                                notifications.map(n => (
+                                    <div
+                                        key={n._id}
+                                        onClick={() => {
+                                            const targetHighlight = n.relatedId || n.referenceId;
+                                            const wsId = n.workspaceId?._id || n.workspaceId || currentWorkspace?._id;
+
+                                            if (n.link) {
+                                                navigate(n.link);
+                                            } else if (n.type === 'mention' || n.type === 'general') {
+                                                if (n.referenceId && wsId) {
+                                                    navigate(`/workspace/${wsId}?channel=${n.referenceId}${targetHighlight ? `&highlight=${targetHighlight}` : ''}`);
+                                                }
+                                            } else if (n.type?.startsWith('task')) {
+                                                if (wsId) {
+                                                    navigate(`/workspace/${wsId}?tab=tasks${targetHighlight ? `&highlight=${targetHighlight}` : ''}`);
+                                                }
+                                            } else if (n.type?.startsWith('note')) {
+                                                if (wsId) {
+                                                    navigate(`/workspace/${wsId}?tab=notes${targetHighlight ? `&highlight=${targetHighlight}` : ''}`);
+                                                }
+                                            }
+                                            setShowNotificationModal(false);
+                                            handleMarkAsRead(n._id);
+                                        }}
+                                        className={`p-4 rounded-2xl border transition-all cursor-pointer group ${n.isRead ? 'bg-[var(--bg-main)]/30 border-[var(--border-color)]' : 'bg-[var(--bg-surface)] border-[var(--brand-primary)]/30 shadow-lg shadow-[var(--brand-primary)]/5'}`}
+                                    >
+                                        <div className="flex gap-4">
+                                            <div className="w-10 h-10 rounded-xl brand-gradient-bg flex items-center justify-center text-white font-black shadow-md shrink-0">
+                                                {n.sender?.name?.charAt(0) || '?'}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex justify-between items-start mb-1">
+                                                    <p className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-tighter truncate pr-2">{n.sender?.name || 'System'}</p>
+                                                    <span className="text-[8px] font-black text-[var(--text-disabled)] uppercase whitespace-nowrap">
+                                                        {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs font-bold text-[var(--text-secondary)] leading-tight mb-2 group-hover:text-[var(--text-primary)] transition-colors">{n.content}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md ${n.type === 'mention' ? 'bg-amber-500/10 text-amber-500' :
+                                                        n.type === 'task_assignment' ? 'bg-[var(--brand-primary)]/10 text-[var(--brand-primary)]' :
+                                                            n.type === 'task_accepted' ? 'bg-green-500/10 text-green-500' :
+                                                                'bg-[var(--bg-main)] text-[var(--text-disabled)]'
+                                                        }`}>
+                                                        {n.type.replace('_', ' ')}
+                                                    </span>
+                                                    {n.workspaceId && (
+                                                        <span className="text-[7px] font-black text-[var(--text-disabled)] uppercase tracking-widest truncate opacity-60">
+                                                            @ {n.workspaceId.name}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
                 </div>

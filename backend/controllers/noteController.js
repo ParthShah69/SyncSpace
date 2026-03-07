@@ -1,4 +1,5 @@
 import Note from '../models/Note.js';
+import Workspace from '../models/Workspace.js';
 
 export const getWorkspaceNotes = async (req, res) => {
     try {
@@ -22,7 +23,7 @@ export const getNoteById = async (req, res) => {
 
 export const createNote = async (req, res) => {
     try {
-        const { workspaceId, title, content, createdFromMessageId } = req.body;
+        const { workspaceId, title, content, createdFromMessageId, checklists, allowedEditors } = req.body;
         const userId = req.user._id;
 
         const note = await Note.create({
@@ -30,7 +31,10 @@ export const createNote = async (req, res) => {
             title,
             content,
             lastEditedBy: userId,
-            createdFromMessageId
+            creator: userId,
+            createdFromMessageId,
+            checklists: checklists || [],
+            allowedEditors: allowedEditors || [userId] // Creator is allowed by default
         });
 
         res.status(201).json(note);
@@ -42,16 +46,42 @@ export const createNote = async (req, res) => {
 export const updateNote = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, content } = req.body;
+        const { title, content, checklists, allowedEditors } = req.body;
         const userId = req.user._id;
 
-        const note = await Note.findByIdAndUpdate(
-            id,
-            { title, content, lastEditedBy: userId },
-            { new: true }
-        );
+        const note = await Note.findById(id);
+        if (!note) return res.status(404).json({ message: 'Note not found' });
 
-        res.json(note);
+        const workspace = await Workspace.findById(note.workspaceId);
+        const member = workspace.members.find(m => (m.user?._id || m.user).toString() === userId.toString());
+        const isAdmin = member && (member.role === 'owner' || member.role === 'admin');
+        const isAllowedByNote = note.allowedEditors?.some(eId => eId.toString() === userId.toString());
+
+        if (!isAdmin && !isAllowedByNote) {
+            return res.status(403).json({ message: 'You do not have permission to edit this note' });
+        }
+
+        if (title !== undefined) note.title = title;
+        if (content !== undefined) note.content = content;
+        if (checklists !== undefined) note.checklists = checklists;
+
+        // Fallback for legacy notes: set creator to lastEditedBy if it doesn't exist
+        if (!note.creator && note.lastEditedBy) {
+            note.creator = note.lastEditedBy;
+        }
+
+        const isCreator = note.creator && note.creator.toString() === userId.toString();
+        const canManagePermissions = isAdmin || isCreator;
+
+        // Only admins/owners or the ORIGINAL creator can change allowedEditors
+        if (allowedEditors !== undefined && canManagePermissions) {
+            note.allowedEditors = allowedEditors;
+        }
+
+        note.lastEditedBy = userId;
+        const updatedNote = await note.save();
+
+        res.json(updatedNote);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

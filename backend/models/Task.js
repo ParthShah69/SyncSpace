@@ -42,6 +42,20 @@ const taskSchema = mongoose.Schema(
         dueDate: {
             type: Date,
         },
+        deadline: {
+            type: Date,
+        },
+        acceptanceStatus: {
+            type: String,
+            enum: ['pending', 'accepted', 'rejected'],
+            default: 'pending',
+        },
+        acceptedBy: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User',
+            }
+        ],
         order: {
             type: Number,
             default: 0,

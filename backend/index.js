@@ -12,6 +12,7 @@ import messageRoutes from './routes/messageRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
 import noteRoutes from './routes/noteRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 dotenv.config();
 
@@ -30,6 +31,8 @@ const io = new Server(httpServer, {
     },
 });
 
+app.set('io', io);
+
 // Middleware
 app.use(express.json());
 app.use(cookieParser());
@@ -47,6 +50,7 @@ Math.random() // trigger reload hack
 app.use('/api/tasks', taskRoutes);
 app.use('/api/notes', noteRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.get('/', (req, res) => {
     res.send('SyncSpace API is running');
@@ -59,6 +63,11 @@ io.on('connection', (socket) => {
     socket.on('joinWorkspace', (workspaceId) => {
         socket.join(workspaceId);
         console.log(`User ${socket.id} joined workspace: ${workspaceId}`);
+    });
+
+    socket.on('joinUser', (userId) => {
+        socket.join(userId);
+        console.log(`User ${socket.id} joined personal room: ${userId}`);
     });
 
     socket.on('joinChannel', (channelId) => {

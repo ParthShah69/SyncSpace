@@ -31,6 +31,18 @@ const userSchema = mongoose.Schema(
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'Workspace',
             }
+        ],
+        mutedChannels: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Channel',
+            }
+        ],
+        leftChannels: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Channel',
+            }
         ]
     },
     {

@@ -1,5 +1,50 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+    /* Universal Brand Colors */
+    --brand-primary: #D500F9;
+    --brand-secondary: #00E5FF;
+    --brand-gradient: linear-gradient(135deg, #D500F9, #00E5FF);
+
+    /* Light Theme (Default) */
+    --bg-main: #F4F4F9;
+    --bg-surface: #FFFFFF;
+    --text-primary: #121212;
+    --text-secondary: #5E5E66;
+    --text-disabled: #A0A0A8;
+    --border-color: #E0E0E5;
+    --element-disabled-bg: #EAEAEF;
+}
+
+.dark {
+    /* Dark Theme Overrides */
+    --bg-main: #121212;
+    --bg-surface: #1E1E24;
+    --text-primary: #FFFFFF;
+    --text-secondary: #B3B3B3;
+    --text-disabled: #666670;
+    --border-color: #33333D;
+    --element-disabled-bg: #2A2A35;
+}
+
+body {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
+    font-family: 'Inter', sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.brand-font {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
 
 /* Quill Dark Mode & Sizing Overrides */
 .quill-dark-wrapper {
@@ -19,46 +64,57 @@
     overflow-y: auto;
     border-bottom-left-radius: 0.5rem;
     border-bottom-right-radius: 0.5rem;
+    font-family: inherit;
+    font-size: 1rem;
 }
 
 .quill-dark-wrapper .ql-toolbar {
     border-top-left-radius: 0.5rem;
     border-top-right-radius: 0.5rem;
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
 }
 
 .dark .quill-dark-wrapper .ql-toolbar {
-    background-color: #1e293b;
-    /* slate-800 */
-    border-color: #334155;
-    /* slate-700 */
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
+}
+
+.quill-dark-wrapper .ql-container {
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
+    color: var(--text-primary);
 }
 
 .dark .quill-dark-wrapper .ql-container {
-    background-color: #0f172a;
-    /* slate-900 */
-    border-color: #334155;
-    /* slate-700 */
-    color: #f1f5f9;
-    /* slate-100 */
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.quill-dark-wrapper .ql-stroke {
+    stroke: var(--text-secondary);
 }
 
 .dark .quill-dark-wrapper .ql-stroke {
-    stroke: #cbd5e1;
-    /* slate-300 */
+    stroke: var(--text-secondary);
+}
+
+.quill-dark-wrapper .ql-fill {
+    fill: var(--text-secondary);
 }
 
 .dark .quill-dark-wrapper .ql-fill {
-    fill: #cbd5e1;
-    /* slate-300 */
+    fill: var(--text-secondary);
 }
 
-.dark .quill-dark-wrapper .ql-picker {
-    color: #cbd5e1;
+.quill-dark-wrapper .ql-picker {
+    color: var(--text-primary);
 }
 
-.dark .quill-dark-wrapper .ql-picker-options {
-    background-color: #1e293b;
-    border-color: #334155;
+.quill-dark-wrapper .ql-picker-options {
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
 }
 
 /* Hide scrollbars while keeping scroll functionality */
@@ -76,4 +132,74 @@
     /* Chrome, Safari, Edge */
 }
 
-/* Quill Toolbar — custom tooltips on hover */
+/* Custom transitions and animations */
+.transition-all-custom {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.brand-gradient-text {
+    background: var(--brand-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.brand-gradient-bg {
+    background: var(--brand-gradient);
+}
+
+/* --- Highlighting & Feedback --- */
+.premium-glow {
+    position: relative;
+    border: 3px solid var(--brand-primary) !important;
+    box-shadow: 0 0 40px rgba(213, 0, 249, 0.6);
+    animation: premium-glow-pulse 1.5s ease-in-out infinite;
+    z-index: 50;
+}
+
+@keyframes premium-glow-pulse {
+    0% {
+        box-shadow: 0 0 20px rgba(213, 0, 249, 0.3);
+        transform: scale(1);
+        border-color: rgba(213, 0, 249, 0.6);
+    }
+
+    50% {
+        box-shadow: 0 0 50px rgba(213, 0, 249, 0.8);
+        transform: scale(1.03);
+        border-color: rgba(213, 0, 249, 1);
+    }
+
+    100% {
+        box-shadow: 0 0 20px rgba(213, 0, 249, 0.3);
+        transform: scale(1);
+        border-color: rgba(213, 0, 249, 0.6);
+    }
+}
+
+.tagged-pulse {
+    position: relative;
+    animation: tagged-light-glow 3s ease-in-out infinite;
+}
+
+@keyframes tagged-light-glow {
+    0% {
+        opacity: 0.15;
+        transform: scale(0.99);
+    }
+
+    50% {
+        opacity: 0.35;
+        transform: scale(1.01);
+    }
+
+    100% {
+        opacity: 0.15;
+        transform: scale(0.99);
+    }
+}
+
+.highlight-task-active {
+    transform: scale(1.02);
+    z-index: 50;
+}

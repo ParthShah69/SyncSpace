@@ -20,10 +20,26 @@ const noteSchema = mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
         },
+        creator: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
         createdFromMessageId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Message',
-        }
+        },
+        checklists: [
+            {
+                text: { type: String, required: true },
+                completed: { type: Boolean, default: false }
+            }
+        ],
+        allowedEditors: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User'
+            }
+        ]
     },
     {
         timestamps: true,

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Plus, GripVertical, CheckCircle2, Clock, Circle, ArrowUp, ArrowDown, X, Trash2 } from 'lucide-react';
+import { Plus, GripVertical, CheckCircle2, Clock, Circle, ArrowUp, ArrowDown, X, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useWorkspaceStore } from '../store/workspaceStore';
 import api from '../utils/api';
 import { format } from 'date-fns';
+import { useSearchParams } from 'react-router-dom';
 
 export default function TaskBoard({ workspaceId }) {
     const { user } = useAuthStore();
@@ -12,9 +13,18 @@ export default function TaskBoard({ workspaceId }) {
 
     const [tasks, setTasks] = useState([]);
     const [showNewTask, setShowNewTask] = useState(false);
-    const [newTaskTitle, setNewTaskTitle] = useState('');
+    const [newTask, setNewTask] = useState({
+        title: '',
+        description: '',
+        priority: 'Medium',
+        deadline: '',
+        taggedMembers: []
+    });
     const [loading, setLoading] = useState(true);
     const [editingTask, setEditingTask] = useState(null);
+    const [activeColumn, setActiveColumn] = useState('Todo');
+    const [searchParams] = useSearchParams();
+    const highlightId = searchParams.get('highlight');
 
     const canEditTask = (task) => {
         if (!task || !user || !workspace) return false;
@@ -34,10 +44,22 @@ export default function TaskBoard({ workspaceId }) {
     };
 
     const columns = [
-        { id: 'Todo', title: 'To Do', icon: <Circle size={16} className="text-gray-400" /> },
-        { id: 'In Progress', title: 'In Progress', icon: <Clock size={16} className="text-blue-500" /> },
-        { id: 'Done', title: 'Done', icon: <CheckCircle2 size={16} className="text-green-500" /> },
+        { id: 'Todo', title: 'To Do', icon: <Circle size={18} className="text-[var(--text-disabled)]" /> },
+        { id: 'In Progress', title: 'In Progress', icon: <Clock size={18} className="text-[var(--brand-secondary)]" /> },
+        { id: 'Done', title: 'Done', icon: <CheckCircle2 size={18} className="text-[var(--brand-primary)]" /> },
     ];
+
+    useEffect(() => {
+        if (!loading && highlightId) {
+            const timer = setTimeout(() => {
+                const el = document.getElementById(`task-${highlightId}`);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [loading, highlightId]);
 
     useEffect(() => {
         if (!workspaceId) return;
@@ -57,19 +79,34 @@ export default function TaskBoard({ workspaceId }) {
 
     const handleCreateTask = async (e) => {
         e.preventDefault();
-        if (!newTaskTitle.trim()) return;
+        if (!newTask.title.trim()) return;
 
         try {
             const { data } = await api.post('/tasks', {
                 workspaceId,
-                title: newTaskTitle,
+                ...newTask,
                 status: 'Todo',
             });
             setTasks([...tasks, data]);
-            setNewTaskTitle('');
+            setNewTask({
+                title: '',
+                description: '',
+                priority: 'Medium',
+                deadline: '',
+                taggedMembers: []
+            });
             setShowNewTask(false);
         } catch (error) {
             console.error("Failed to create task", error);
+        }
+    };
+
+    const handleAcceptReject = async (taskId, status) => {
+        try {
+            const { data } = await api.put(`/tasks/${taskId}/accept-reject`, { status });
+            setTasks(tasks.map(t => t._id === taskId ? data : t));
+        } catch (error) {
+            console.error("Failed to update acceptance status", error);
         }
     };
 
@@ -82,12 +119,13 @@ export default function TaskBoard({ workspaceId }) {
         }
     };
 
-    const handleUpdateTask = async (e) => {
-        e.preventDefault();
+    const handleUpdateTask = async (e, manualTask = null) => {
+        if (e) e.preventDefault();
+        const taskToUpdate = manualTask || editingTask;
         try {
-            const { data } = await api.put(`/tasks/${editingTask._id}`, editingTask);
-            setTasks(tasks.map(t => t._id === data._id ? data : t));
-            setEditingTask(null);
+            const { data } = await api.put(`/tasks/${taskToUpdate._id}`, taskToUpdate);
+            setTasks(tasks.map(t => t._id === data._id ? { ...data, creator: taskToUpdate.creator, taggedMembers: data.taggedMembers || [] } : t));
+            if (!manualTask) setEditingTask(null);
         } catch (error) {
             console.error("Failed to update task", error);
         }
@@ -134,169 +172,368 @@ export default function TaskBoard({ workspaceId }) {
     }
 
     return (
-        <div className="flex-1 flex flex-col bg-gray-50 dark:bg-slate-900 h-full overflow-hidden p-4 md:p-6 gap-6 transition-colors duration-200">
+        <div className="flex-1 flex flex-col md:flex-row bg-[var(--bg-main)] h-full overflow-hidden transition-all duration-300">
 
-            {/* Header */}
-            <div className="flex items-center justify-between z-10">
-                <div>
-                    <h2 className="text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-100">Task Board</h2>
-                    <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm">Manage and track your team's progress</p>
+            {/* Main Content Area */}
+            <div className={`flex-1 flex flex-col min-w-0 transition-all duration-500 ${showNewTask ? 'md:mr-4' : ''}`}>
+                <div className="p-6 md:p-8 flex items-center justify-between">
+                    <div>
+                        <h2 className="text-2xl md:text-3xl font-black text-[var(--text-primary)] tracking-tight uppercase">Task Board</h2>
+                        <p className="text-[var(--text-secondary)] text-[10px] font-black uppercase tracking-widest opacity-60">Strategic Workflow Management</p>
+                    </div>
+                    {!showNewTask && (
+                        <button
+                            onClick={() => setShowNewTask(true)}
+                            className="flex items-center gap-3 px-6 py-3 brand-gradient-bg text-white rounded-2xl shadow-xl shadow-[var(--brand-primary)]/20 hover:scale-105 active:scale-95 transition-all text-[10px] font-black uppercase tracking-widest"
+                        >
+                            <Plus size={18} /> New Task
+                        </button>
+                    )}
                 </div>
-                <button
-                    onClick={() => setShowNewTask(true)}
-                    className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-xl shadow-md shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-colors text-sm font-medium"
-                >
-                    <Plus size={16} className="md:mr-2" /> <span className="hidden md:inline">New Task</span>
-                </button>
+
+                <div className="px-6 md:hidden mb-4">
+                    <div className="flex bg-[var(--bg-surface)] p-1.5 rounded-2xl border border-[var(--border-color)]">
+                        {columns.map(col => (
+                            <button
+                                key={col.id}
+                                onClick={() => setActiveColumn(col.id)}
+                                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeColumn === col.id ? 'brand-gradient-bg text-white shadow-lg' : 'text-[var(--text-disabled)]'}`}
+                            >
+                                {col.title}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-x-auto overflow-y-hidden pb-8 px-6 md:px-8 mt-2 custom-scrollbar">
+                    <div className="flex gap-4 md:gap-8 h-full min-w-full pb-4 items-stretch">
+                        {columns.map(column => {
+                            const isVisible = activeColumn === column.id;
+                            const priorityWeight = { 'High': 1, 'Medium': 2, 'Low': 3 };
+                            const columnTasks = tasks.filter(t => t.status === column.id).sort((a, b) => {
+                                const pA = priorityWeight[a.priority || 'Medium'];
+                                const pB = priorityWeight[b.priority || 'Medium'];
+                                if (pA !== pB) return pA - pB;
+                                return (a.order || 0) - (b.order || 0);
+                            });
+
+                            return (
+                                <div key={column.id} className={`${isVisible ? 'flex' : 'hidden'} md:flex w-full md:w-[350px] flex-col bg-[var(--bg-surface)] rounded-[2.5rem] p-6 border border-[var(--border-color)] shadow-xl shadow-black/5 shrink-0 min-h-0 h-[calc(100vh-250px)] md:h-full`}>
+                                    <div className="flex items-center justify-between mb-8 px-2">
+                                        <h3 className="text-sm font-black text-[var(--text-primary)] flex items-center gap-3 uppercase tracking-tighter">
+                                            <div className={`p-2 rounded-xl bg-[var(--bg-main)] border border-[var(--border-color)]`}>{column.icon}</div>
+                                            {column.title}
+                                        </h3>
+                                        <span className="bg-[var(--bg-main)] text-[var(--text-secondary)] text-[10px] font-black px-3 py-1.5 rounded-full border border-[var(--border-color)]">
+                                            {columnTasks.length}
+                                        </span>
+                                    </div>
+
+                                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-1">
+                                        {columnTasks.length === 0 ? (
+                                            <div className="border-2 border-dashed border-[var(--border-color)] rounded-[2rem] h-32 flex flex-col items-center justify-center text-[var(--text-disabled)] gap-2 p-6 transition-all hover:border-[var(--brand-secondary)]/30 group">
+                                                <div className="w-10 h-10 rounded-full bg-[var(--bg-main)] flex items-center justify-center border border-[var(--border-color)] group-hover:scale-110 transition-transform">
+                                                    <Plus size={16} className="opacity-40" />
+                                                </div>
+                                                <span className="text-[10px] font-black uppercase tracking-widest">No Tasks</span>
+                                            </div>
+                                        ) : (
+                                            columnTasks.map((task, idx) => {
+                                                const isRejected = task.acceptanceStatus === 'rejected';
+                                                const isPending = task.acceptanceStatus === 'pending';
+                                                const isMyTaggedTask = (task.taggedMembers || []).some(m => (m._id || m).toString() === user._id.toString());
+                                                const isMentioned = task.title?.toLowerCase().includes(`@${user?.name?.toLowerCase()}`) ||
+                                                    task.title?.toLowerCase().includes(`@${user?.username?.toLowerCase()}`) ||
+                                                    task.description?.toLowerCase().includes(`@${user?.name?.toLowerCase()}`) ||
+                                                    task.description?.toLowerCase().includes(`@${user?.username?.toLowerCase()}`);
+
+                                                let classes = `bg-[var(--bg-main)] p-5 rounded-3xl border border-[var(--border-color)] group hover:shadow-2xl hover:shadow-[var(--brand-primary)]/10 hover:border-[var(--brand-primary)]/30 transition-all cursor-pointer relative overflow-hidden ${isRejected ? 'opacity-60 border-red-500/30' : ''} ${highlightId === task._id ? 'premium-glow highlight-task-active shadow-2xl' : ''}`;
+                                                if (isMyTaggedTask || isMentioned) classes += ' tagged-pulse';
+
+                                                return (
+                                                    <div
+                                                        key={task._id}
+                                                        id={`task-${task._id}`}
+                                                        onClick={() => {
+                                                            if (canEditTask(task)) setEditingTask(task);
+                                                            else alert('You do not have permission to edit this task.');
+                                                        }}
+                                                        className={classes}
+                                                    >
+                                                        {/* Status bar */}
+                                                        <div className={`absolute top-0 left-0 w-1.5 h-full ${task.priority === 'High' ? 'brand-gradient-bg' :
+                                                            task.priority === 'Medium' ? 'bg-[var(--brand-secondary)]' :
+                                                                'bg-[var(--text-disabled)]'
+                                                            }`} />
+
+                                                        <div className="flex justify-between items-start mb-4 gap-3">
+                                                            <h4 className="font-black text-[var(--text-primary)] text-sm tracking-tight leading-snug flex-1">{task.title}</h4>
+                                                            <div className="flex flex-col gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all" onClick={(e) => e.stopPropagation()}>
+                                                                <div className="flex gap-1 mb-1">
+                                                                    <button
+                                                                        disabled={task.status === 'Todo'}
+                                                                        onClick={() => {
+                                                                            const prevStatus = task.status === 'Done' ? 'In Progress' : 'Todo';
+                                                                            handleStatusChange(task._id, prevStatus);
+                                                                        }}
+                                                                        className="p-1 text-[var(--text-disabled)] hover:text-[var(--brand-primary)] hover:bg-[var(--bg-surface)] rounded-lg disabled:opacity-20 transition-all"
+                                                                        title="Move Back"
+                                                                    >
+                                                                        <ArrowLeft size={12} />
+                                                                    </button>
+                                                                    <button
+                                                                        disabled={task.status === 'Done'}
+                                                                        onClick={() => {
+                                                                            const nextStatus = task.status === 'Todo' ? 'In Progress' : 'Done';
+                                                                            handleStatusChange(task._id, nextStatus);
+                                                                        }}
+                                                                        className="p-1 text-[var(--text-disabled)] hover:text-[var(--brand-secondary)] hover:bg-[var(--bg-surface)] rounded-lg disabled:opacity-20 transition-all"
+                                                                        title="Move Forward"
+                                                                    >
+                                                                        <ArrowRight size={12} />
+                                                                    </button>
+                                                                </div>
+                                                                <button disabled={idx === 0} onClick={() => moveTask(task, 'up')} className="p-1.5 text-[var(--text-disabled)] hover:text-[var(--brand-primary)] hover:bg-[var(--bg-surface)] rounded-lg disabled:opacity-20 transition-all"><ArrowUp size={14} /></button>
+                                                                <button disabled={idx === columnTasks.length - 1} onClick={() => moveTask(task, 'down')} className="p-1.5 text-[var(--text-disabled)] hover:text-[var(--brand-secondary)] hover:bg-[var(--bg-surface)] rounded-lg disabled:opacity-20 transition-all"><ArrowDown size={14} /></button>
+                                                            </div>
+                                                        </div>
+
+                                                        {task.description && (
+                                                            <p className="text-[11px] font-medium text-[var(--text-secondary)] leading-relaxed mb-4 line-clamp-3 opacity-80">{task.description}</p>
+                                                        )}
+
+                                                        <div className="flex items-center justify-between pt-2 border-t border-[var(--border-color)]">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className={`w-2 h-2 rounded-full ${task.priority === 'High' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
+                                                                    task.priority === 'Medium' ? 'bg-amber-500' :
+                                                                        'bg-slate-400'
+                                                                    }`} />
+                                                                <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-disabled)]">
+                                                                    {task.priority || 'Medium'}
+                                                                </span>
+                                                            </div>
+
+                                                            {/* Accept/Reject Actions for Team members */}
+                                                            {isPending &&
+                                                                task.taggedMembers?.length > 0 &&
+                                                                !(task.taggedMembers.length === 1 && (task.taggedMembers[0]._id || task.taggedMembers[0]) === (task.creator?._id || task.creator)) &&
+                                                                task.taggedMembers?.some(m => (m._id || m) === user._id) &&
+                                                                !task.acceptedBy?.some(id => (id._id || id) === user._id) ? (
+                                                                <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                                                                    <button
+                                                                        onClick={() => handleAcceptReject(task._id, 'accepted')}
+                                                                        className="text-[8px] font-black uppercase tracking-widest px-2 py-1 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors shadow-lg shadow-green-500/20"
+                                                                    >
+                                                                        Accept
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleAcceptReject(task._id, 'rejected')}
+                                                                        className="text-[8px] font-black uppercase tracking-widest px-2 py-1 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors shadow-lg shadow-red-500/20"
+                                                                    >
+                                                                        Reject
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex flex-col items-end gap-1">
+                                                                    {isPending && task.taggedMembers?.length > 0 && (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-[7px] font-black text-[var(--text-disabled)] uppercase tracking-widest">
+                                                                                {task.acceptedBy?.length || 0} / {task.taggedMembers?.length + (task.acceptedBy?.length || 0)} Accepted
+                                                                            </span>
+                                                                            <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-lg">Pending</span>
+                                                                        </div>
+                                                                    )}
+                                                                    {isRejected && (
+                                                                        <div className="flex flex-col items-end gap-2">
+                                                                            <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg">All Rejected</span>
+                                                                            {(task.creator?._id || task.creator) === user._id && (
+                                                                                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                                                    <button
+                                                                                        onClick={() => handleUpdateTask({ preventDefault: () => { }, target: {} }, { ...task, acceptanceStatus: 'accepted' })}
+                                                                                        className="text-[7px] font-black uppercase bg-[var(--bg-surface)] border border-[var(--border-color)] px-2 py-1 rounded-md hover:border-[var(--brand-primary)]"
+                                                                                    >Keep</button>
+                                                                                    <button
+                                                                                        onClick={() => handleDeleteTask(task._id)}
+                                                                                        className="text-[7px] font-black uppercase bg-red-500 text-white px-2 py-1 rounded-md hover:bg-red-600"
+                                                                                    >Remove</button>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+
+                                                            <div className="flex -space-x-1.5 overflow-hidden">
+                                                                {task.taggedMembers?.slice(0, 3).map((m, i) => {
+                                                                    const memberName = m.name || (workspace?.members.find(wm => (wm.user?._id || wm.user) === (m._id || m))?.user?.name) || 'Specialist';
+                                                                    return (
+                                                                        <div key={i} title={memberName} className="w-5 h-5 rounded-full border-2 border-[var(--bg-main)] brand-gradient-bg flex items-center justify-center text-[7px] font-black text-white shadow-sm ring-1 ring-black/5">
+                                                                            {memberName.charAt(0).toUpperCase()}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                                {task.taggedMembers?.length > 3 && (
+                                                                    <div className="w-5 h-5 rounded-full border-2 border-[var(--bg-main)] bg-[var(--bg-surface)] flex items-center justify-center text-[7px] font-black text-[var(--text-disabled)] shadow-sm">
+                                                                        +{task.taggedMembers.length - 3}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {task.deadline && (
+                                                            <div className="mt-3 flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-[var(--brand-secondary)] opacity-80 bg-[var(--bg-surface)] w-fit px-2 py-1 rounded-md border border-[var(--border-color)]">
+                                                                <Clock size={10} />
+                                                                {format(new Date(task.deadline), 'MMM dd, yyyy')}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
             </div>
 
-            {/* New Task Inline Form */}
+            {/* Premium New Task Side Panel */}
             {showNewTask && (
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-indigo-100 dark:border-indigo-900/50 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 animate-in fade-in slide-in-from-top-2">
-                    <input
-                        type="text"
-                        autoFocus
-                        value={newTaskTitle}
-                        onChange={(e) => setNewTaskTitle(e.target.value)}
-                        placeholder="What needs to be done?"
-                        className="flex-1 bg-gray-50 dark:bg-slate-900/50 dark:text-gray-100 border-none rounded-lg px-4 py-3 sm:py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
-                        onKeyDown={(e) => e.key === 'Enter' && handleCreateTask(e)}
-                    />
-                    <div className="flex justify-end gap-2">
-                        <button onClick={handleCreateTask} className="px-4 py-2 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 font-medium rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-500/30">Save</button>
-                        <button onClick={() => setShowNewTask(false)} className="px-4 py-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
+                <div className="fixed inset-0 md:relative md:w-[450px] bg-[var(--bg-surface)] md:border-l border-[var(--border-color)] h-full flex flex-col shadow-2xl z-[100] md:z-40 animate-in slide-in-from-right-12 duration-500">
+                    <div className="p-8 border-b border-[var(--border-color)] flex justify-between items-center">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-2xl brand-gradient-bg flex items-center justify-center text-white shadow-lg shadow-[var(--brand-primary)]/20">
+                                <Plus size={24} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-[var(--text-primary)] tracking-tight uppercase">Draft Task</h3>
+                                <p className="text-[10px] font-black text-[var(--brand-primary)] uppercase tracking-widest">{workspace?.name}</p>
+                            </div>
+                        </div>
+                        <button onClick={() => setShowNewTask(false)} className="p-3 bg-[var(--bg-main)] text-[var(--text-disabled)] hover:text-red-500 rounded-2xl border border-[var(--border-color)] transition-all">
+                            <X size={20} />
+                        </button>
                     </div>
+
+                    <form onSubmit={handleCreateTask} className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                        <div className="space-y-3">
+                            <label className="text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] ml-1">Task Identification</label>
+                            <input
+                                type="text"
+                                autoFocus
+                                value={newTask.title}
+                                onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                                placeholder="Core objective name..."
+                                className="w-full px-6 py-5 bg-[var(--bg-main)] text-[var(--text-primary)] font-black border border-[var(--border-color)] rounded-2xl outline-none focus:border-[var(--brand-primary)] focus:ring-4 focus:ring-[var(--brand-primary)]/10 transition-all text-sm placeholder:text-[var(--text-disabled)]/40"
+                            />
+                        </div>
+
+                        <div className="space-y-3">
+                            <label className="text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] ml-1">Strategic Details</label>
+                            <textarea
+                                value={newTask.description}
+                                onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+                                rows={4}
+                                placeholder="Elaborate on the requirements and expected outcomes..."
+                                className="w-full px-6 py-5 bg-[var(--bg-main)] text-[var(--text-primary)] font-bold border border-[var(--border-color)] rounded-2xl outline-none focus:border-[var(--brand-secondary)] transition-all text-sm placeholder:text-[var(--text-disabled)]/40 resize-none min-h-[120px]"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-6">
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] ml-1">Priority Level</label>
+                                <select
+                                    value={newTask.priority}
+                                    onChange={(e) => setNewTask({ ...newTask, priority: e.target.value })}
+                                    className="w-full px-6 py-4 bg-[var(--bg-main)] text-[var(--text-primary)] font-black border border-[var(--border-color)] rounded-2xl outline-none appearance-none cursor-pointer hover:border-[var(--brand-primary)] transition-all text-xs"
+                                >
+                                    <option value="Low">Low Priority</option>
+                                    <option value="Medium">Medium Priority</option>
+                                    <option value="High">High Priority</option>
+                                </select>
+                            </div>
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] ml-1">Deadline Date</label>
+                                <input
+                                    type="date"
+                                    value={newTask.deadline}
+                                    onChange={(e) => setNewTask({ ...newTask, deadline: e.target.value })}
+                                    className="w-full px-6 py-4 bg-[var(--bg-main)] text-[var(--text-primary)] font-black border border-[var(--border-color)] rounded-2xl outline-none hover:border-[var(--brand-secondary)] transition-all text-xs"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <label className="text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] ml-1">Assign Specialists</label>
+                            <div className="flex flex-wrap gap-2.5">
+                                {workspace?.members?.map(m => {
+                                    const isSelected = newTask.taggedMembers?.includes(m.user?._id || m.user);
+                                    return (
+                                        <button
+                                            key={m.user?._id || m.user}
+                                            type="button"
+                                            onClick={() => {
+                                                const userId = m.user?._id || m.user;
+                                                const current = newTask.taggedMembers || [];
+                                                if (isSelected) setNewTask({ ...newTask, taggedMembers: current.filter(id => id !== userId) });
+                                                else setNewTask({ ...newTask, taggedMembers: [...current, userId] });
+                                            }}
+                                            className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${isSelected ? 'brand-gradient-bg text-white border-transparent shadow-lg shadow-[var(--brand-primary)]/30' : 'bg-[var(--bg-main)] border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--brand-secondary)] hover:text-[var(--text-primary)]'}`}
+                                        >
+                                            {m.user?.name || 'Unknown'}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="pt-8">
+                            <button
+                                type="submit"
+                                disabled={!newTask.title.trim()}
+                                className="w-full py-5 brand-gradient-bg text-white rounded-[1.5rem] font-black uppercase tracking-widest text-xs shadow-[0_20px_40px_rgba(213,0,249,0.2)] hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 disabled:grayscale transition-all"
+                            >
+                                Dispatch Task
+                            </button>
+                        </div>
+                    </form>
                 </div>
             )}
 
-            {/* Kanban Board */}
-            <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4 md:px-0 snap-x snap-mandatory">
-                <div className="flex gap-6 h-full w-max px-4 md:px-0">
-                    {columns.map(column => {
-                        const priorityWeight = { 'High': 1, 'Medium': 2, 'Low': 3 };
-                        const columnTasks = tasks.filter(t => t.status === column.id).sort((a, b) => {
-                            const pA = priorityWeight[a.priority || 'Medium'];
-                            const pB = priorityWeight[b.priority || 'Medium'];
-                            if (pA !== pB) return pA - pB;
-                            return (a.order || 0) - (b.order || 0);
-                        });
-
-                        return (
-                            <div key={column.id} className="w-[85vw] max-w-xs md:w-80 flex flex-col bg-gray-100/50 dark:bg-slate-800/30 rounded-2xl p-4 border border-gray-200 dark:border-slate-700/50 snap-center shrink-0">
-
-                                {/* Column Header */}
-                                <div className="flex items-center justify-between mb-4 px-2">
-                                    <h3 className="font-bold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                                        {column.icon} {column.title}
-                                    </h3>
-                                    <span className="bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-gray-300 text-xs font-bold px-2.5 py-1 rounded-full">
-                                        {columnTasks.length}
-                                    </span>
-                                </div>
-
-                                {/* Column Tasks */}
-                                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 px-1">
-                                    {columnTasks.length === 0 ? (
-                                        <div className="border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-xl h-24 flex items-center justify-center text-gray-400 dark:text-gray-500 text-xs text-center p-4">
-                                            No tasks in this list
-                                        </div>
-                                    ) : (
-                                        columnTasks.map((task, idx) => (
-                                            <div
-                                                key={task._id}
-                                                onClick={() => {
-                                                    if (canEditTask(task)) setEditingTask(task);
-                                                    else alert('You do not have permission to edit this task.');
-                                                }}
-                                                className={`bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 transition-all ${canEditTask(task) ? 'group hover:shadow-md hover:border-indigo-200 dark:hover:border-indigo-500/50 cursor-pointer' : 'opacity-80'}`}
-                                            >
-                                                <div className="flex justify-between items-start mb-2 gap-2">
-                                                    <h4 className="font-semibold text-gray-800 dark:text-gray-200 text-sm leading-tight break-words flex-1">{task.title}</h4>
-                                                    {canEditTask(task) && (
-                                                        <div className="flex flex-col gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
-                                                            <button disabled={idx === 0} onClick={() => moveTask(task, 'up')} className="text-gray-400 hover:text-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed"><ArrowUp size={14} /></button>
-                                                            <button disabled={idx === columnTasks.length - 1} onClick={() => moveTask(task, 'down')} className="text-gray-400 hover:text-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed"><ArrowDown size={14} /></button>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                {task.description && (
-                                                    <p className="text-xs text-gray-500 line-clamp-2 mb-3">{task.description}</p>
-                                                )}
-
-                                                <div className="flex items-center justify-between mt-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wide
-                              ${task.priority === 'High' ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400' :
-                                                                task.priority === 'Medium' ? 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                                    'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'}`}
-                                                        >
-                                                            {task.priority || 'Medium'}
-                                                        </span>
-                                                    </div>
-
-                                                    {/* Quick Actions Dropdown */}
-                                                    {canEditTask(task) && (
-                                                        <div className="flex flex-wrap gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-gray-50 dark:bg-slate-700/50 rounded-lg p-1" onClick={(e) => e.stopPropagation()}>
-                                                            {column.id !== 'Todo' && (
-                                                                <button onClick={() => handleStatusChange(task._id, 'Todo')} className="p-1 hover:bg-white dark:hover:bg-slate-600 rounded text-gray-500 dark:text-gray-400 shadow-sm" title="Move to Todo">
-                                                                    <Circle size={12} />
-                                                                </button>
-                                                            )}
-                                                            {column.id !== 'In Progress' && (
-                                                                <button onClick={() => handleStatusChange(task._id, 'In Progress')} className="p-1 hover:bg-white dark:hover:bg-slate-600 rounded text-blue-500 dark:text-blue-400 shadow-sm" title="Move to In Progress">
-                                                                    <Clock size={12} />
-                                                                </button>
-                                                            )}
-                                                            {column.id !== 'Done' && (
-                                                                <button onClick={() => handleStatusChange(task._id, 'Done')} className="p-1 hover:bg-white dark:hover:bg-slate-600 rounded text-green-500 dark:text-green-400 shadow-sm" title="Move to Done">
-                                                                    <CheckCircle2 size={12} />
-                                                                </button>
-                                                            )}
-                                                            <button onClick={() => handleDeleteTask(task._id)} className="p-1 hover:bg-white dark:hover:bg-slate-600 rounded text-red-500 shadow-sm" title="Delete Task">
-                                                                <Trash2 size={12} />
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-
             {/* Edit Task Modal */}
             {editingTask && (
-                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setEditingTask(null)}>
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-gray-100 dark:border-slate-700/50 flex justify-between items-center">
-                            <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">Edit Task</h3>
-                            <button onClick={() => setEditingTask(null)} className="text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700 p-2 rounded-lg transition-colors">
-                                <X size={20} />
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 md:p-6 animate-in fade-in duration-300" onClick={() => setEditingTask(null)}>
+                    <div className="bg-[var(--bg-surface)] rounded-3xl md:rounded-[2.5rem] shadow-2xl w-full max-w-xl overflow-hidden animate-in zoom-in-95 duration-400 border border-[var(--border-color)]" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-6 md:p-8 border-b border-[var(--border-color)] flex justify-between items-center bg-[var(--bg-surface)]">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-2xl brand-gradient-bg flex items-center justify-center text-white shadow-lg shadow-[var(--brand-primary)]/20">
+                                    <Clock size={24} />
+                                </div>
+                                <h3 className="text-xl font-black text-[var(--text-primary)] tracking-tight uppercase">Update Strategy</h3>
+                            </div>
+                            <button onClick={() => setEditingTask(null)} className="text-[var(--text-disabled)] hover:text-[var(--text-primary)] p-2.5 rounded-2xl hover:bg-[var(--bg-main)] transition-all">
+                                <X size={24} />
                             </button>
                         </div>
-                        <form onSubmit={handleUpdateTask} className="p-6 space-y-4">
+                        <form onSubmit={handleUpdateTask} className="p-6 md:p-8 space-y-6 custom-scrollbar max-h-[70vh] overflow-y-auto">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+                                <label className="block text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] mb-3 ml-1">Objective Title</label>
                                 <input
                                     type="text"
                                     value={editingTask.title}
                                     onChange={(e) => setEditingTask({ ...editingTask, title: e.target.value })}
-                                    className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-900/50 dark:text-gray-100 border border-gray-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full px-6 py-4 bg-[var(--bg-main)] text-[var(--text-primary)] font-black border border-[var(--border-color)] rounded-2xl outline-none focus:border-[var(--brand-primary)] transition-all text-sm"
                                     required
                                 />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+                                    <label className="block text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] mb-3 ml-1">Workflow Status</label>
                                     <select
                                         value={editingTask.status}
                                         onChange={(e) => setEditingTask({ ...editingTask, status: e.target.value })}
-                                        className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-900/50 dark:text-gray-100 border border-gray-200 dark:border-slate-700 rounded-lg outline-none"
+                                        className="w-full px-6 py-4 bg-[var(--bg-main)] text-[var(--text-primary)] font-black border border-[var(--border-color)] rounded-2xl outline-none appearance-none cursor-pointer"
                                     >
                                         <option value="Todo">To Do</option>
                                         <option value="In Progress">In Progress</option>
@@ -304,11 +541,11 @@ export default function TaskBoard({ workspaceId }) {
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Priority</label>
+                                    <label className="block text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] mb-3 ml-1">Priority Level</label>
                                     <select
                                         value={editingTask.priority || 'Medium'}
                                         onChange={(e) => setEditingTask({ ...editingTask, priority: e.target.value })}
-                                        className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-900/50 dark:text-gray-100 border border-gray-200 dark:border-slate-700 rounded-lg outline-none"
+                                        className="w-full px-6 py-4 bg-[var(--bg-main)] text-[var(--text-primary)] font-black border border-[var(--border-color)] rounded-2xl outline-none appearance-none cursor-pointer"
                                     >
                                         <option value="Low">Low</option>
                                         <option value="Medium">Medium</option>
@@ -317,8 +554,8 @@ export default function TaskBoard({ workspaceId }) {
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tag Members</label>
-                                <div className="flex flex-wrap gap-2">
+                                <label className="block text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] mb-3 ml-1">Stakeholders Assigned</label>
+                                <div className="flex flex-wrap gap-2.5">
                                     {workspace?.members?.map(m => {
                                         const isSelected = editingTask.taggedMembers?.some(t => (t._id || t) === (m.user?._id || m.user));
                                         const myRole = workspace.members.find(mx => (mx.user?._id || mx.user) === user._id)?.role;
@@ -329,8 +566,9 @@ export default function TaskBoard({ workspaceId }) {
                                         const canEditTags = isAdmin || isCreator || isTagged || isNoTags;
 
                                         return (
-                                            <div
+                                            <button
                                                 key={m.user?._id || m.user}
+                                                type="button"
                                                 onClick={() => {
                                                     if (!canEditTags) return;
                                                     const current = editingTask.taggedMembers || [];
@@ -338,28 +576,36 @@ export default function TaskBoard({ workspaceId }) {
                                                     if (isSelected) setEditingTask({ ...editingTask, taggedMembers: current.filter(t => (t._id || t) !== userId) });
                                                     else setEditingTask({ ...editingTask, taggedMembers: [...current, userId] });
                                                 }}
-                                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${!canEditTags ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${isSelected ? 'bg-indigo-100 dark:bg-indigo-900/50 border-indigo-300 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300 shadow-inner' : 'bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'}`}
+                                                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${!canEditTags ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'} ${isSelected ? 'brand-gradient-bg text-white border-transparent' : 'bg-[var(--bg-main)] border-[var(--border-color)] text-[var(--text-secondary)]'}`}
                                             >
                                                 {m.user?.name || 'Unknown'}
-                                            </div>
+                                            </button>
                                         );
                                     })}
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Remarks / Details</label>
+                                <label className="block text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] mb-3 ml-1">Deadline Date</label>
+                                <input
+                                    type="date"
+                                    value={editingTask.deadline ? new Date(editingTask.deadline).toISOString().split('T')[0] : ''}
+                                    onChange={(e) => setEditingTask({ ...editingTask, deadline: e.target.value })}
+                                    className="w-full px-6 py-4 bg-[var(--bg-main)] text-[var(--text-primary)] font-black border border-[var(--border-color)] rounded-2xl outline-none hover:border-[var(--brand-secondary)] transition-all text-xs"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-[var(--text-disabled)] uppercase tracking-[0.2em] mb-3 ml-1">Mission Particulars</label>
                                 <textarea
                                     value={editingTask.description || ''}
                                     onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })}
                                     rows={4}
                                     placeholder="Add specifics on what needs to be done..."
-                                    className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-900/50 dark:text-gray-100 border border-gray-200 dark:border-slate-700 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 custom-scrollbar resize-none"
+                                    className="w-full px-6 py-4 bg-[var(--bg-main)] text-[var(--text-primary)] font-bold border border-[var(--border-color)] rounded-2xl outline-none focus:border-[var(--brand-secondary)] transition-all text-sm resize-none"
                                 />
                             </div>
-                            <div className="flex justify-end pt-2">
-                                <button type="submit" className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl shadow-md font-medium hover:bg-indigo-700">
-                                    Save Changes
-                                </button>
+                            <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 pt-4">
+                                <button type="button" onClick={() => handleDeleteTask(editingTask._id)} className="px-6 py-4 bg-red-500/10 text-red-500 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-red-500 hover:text-white transition-all">Delete Objective</button>
+                                <button type="submit" className="px-10 py-4 brand-gradient-bg text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-[var(--brand-primary)]/20 hover:scale-105 active:scale-95 transition-all">Commit Changes</button>
                             </div>
                         </form>
                     </div>

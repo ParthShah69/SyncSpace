@@ -58,7 +58,10 @@ export const getWorkspaceChannels = async (req, res) => {
             return res.status(403).json({ message: 'Access denied' });
         }
 
-        const channels = await Channel.find({ workspaceId }).sort({ createdAt: 1 });
+        const channels = await Channel.find({
+            workspaceId,
+            _id: { $nin: req.user.leftChannels || [] }
+        }).sort({ createdAt: 1 });
         res.json(channels);
     } catch (error) {
         res.status(500).json({ message: error.message });
